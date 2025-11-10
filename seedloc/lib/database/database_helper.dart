@@ -1,5 +1,7 @@
+import 'dart:io';
 import 'package:sqflite/sqflite.dart';
 import 'package:path/path.dart';
+import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 import '../models/project.dart';
 import '../models/geotag.dart';
 
@@ -9,7 +11,13 @@ class DatabaseHelper {
 
   factory DatabaseHelper() => _instance;
 
-  DatabaseHelper._internal();
+  DatabaseHelper._internal() {
+    // Initialize sqflite for desktop/web
+    if (Platform.isWindows || Platform.isLinux || Platform.isMacOS) {
+      sqfliteFfiInit();
+      databaseFactory = databaseFactoryFfi;
+    }
+  }
 
   Future<Database> get database async {
     if (_database != null) return _database!;

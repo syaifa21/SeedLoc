@@ -51,8 +51,8 @@ dependencies:
   sqflite: ^2.4.0
   path_provider: ^2.1.4
 
-  # Work manager for background tasks
-  workmanager: ^0.5.2
+  # Work manager for background tasks (commented out due to build issues)
+  # workmanager: ^0.5.2
 
   # CSV export
   csv: ^6.0.0
@@ -60,6 +60,9 @@ dependencies:
   # Permission handler
   permission_handler: ^11.3.1
   device_info_plus: ^12.2.0
+
+  # SQLite for web/desktop
+  sqflite_common_ffi: ^2.3.3
 
 dev_dependencies:
   flutter_test:
@@ -73,7 +76,7 @@ dev_dependencies:
   flutter_lints: ^5.0.0
 
 # For information on the generic Dart part of this file, see the
-# following page: https://dart.dev/tools/pub/pubspec
+# following page: https://dart.dev/tools/pubspec
 
 # The following section is specific to Flutter packages.
 flutter:
@@ -92,7 +95,7 @@ flutter:
   # https://flutter.dev/to/resolution-aware-images
 
   # For details regarding adding assets from package dependencies, see
-  # https://flutter.dev/to/asset-from-package
+  # https://flutter.dev/to/font-from-package
 
   # To add custom fonts to your application, add a fonts section here,
   # in this "flutter" section. Each entry in this list should have a
