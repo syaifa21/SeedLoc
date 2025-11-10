@@ -75,6 +75,48 @@ class _SettingsScreenState extends State<SettingsScreen> {
     }
   }
 
+  Future<void> _stopProject() async {
+    showDialog(
+      context: context,
+      builder: (BuildContext context) {
+        return AlertDialog(
+          title: const Text('Stop Project'),
+          content: const Text('Apakah Anda yakin ingin menghentikan project ini? Semua data akan dihapus dan Anda akan kembali ke halaman pembuatan project baru.'),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(),
+              child: const Text('Batal'),
+            ),
+            TextButton(
+              onPressed: () async {
+                Navigator.of(context).pop();
+                await _confirmStopProject();
+              },
+              style: TextButton.styleFrom(foregroundColor: Colors.red),
+              child: const Text('Stop Project'),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+  Future<void> _confirmStopProject() async {
+    try {
+      DatabaseHelper dbHelper = DatabaseHelper();
+      await dbHelper.clearAllData();
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Project dihentikan. Membuat project baru...')),
+      );
+      // Navigate back to home screen which will show project creation
+      Navigator.of(context).pushReplacementNamed('/home');
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Error menghentikan project: $e')),
+      );
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -131,6 +173,43 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       padding: const EdgeInsets.only(top: 10),
                       child: Text(_exportStatus),
                     ),
+                ],
+              ),
+            ),
+          ),
+
+          const SizedBox(height: 20),
+
+          // Stop Project Section
+          Card(
+            child: Padding(
+              padding: const EdgeInsets.all(16.0),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text(
+                    'Manajemen Project',
+                    style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                  ),
+                  const SizedBox(height: 8),
+                  const Text(
+                    'Hentikan project saat ini dan buat project baru',
+                    style: TextStyle(color: Colors.grey),
+                  ),
+                  const SizedBox(height: 16),
+                  SizedBox(
+                    width: double.infinity,
+                    child: ElevatedButton.icon(
+                      onPressed: _stopProject,
+                      icon: const Icon(Icons.stop),
+                      label: const Text('Stop Project'),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: Colors.red,
+                        foregroundColor: Colors.white,
+                        padding: const EdgeInsets.symmetric(vertical: 12),
+                      ),
+                    ),
+                  ),
                 ],
               ),
             ),

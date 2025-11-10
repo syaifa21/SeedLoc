@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import '../models/geotag.dart';
 import '../database/database_helper.dart';
 import 'field_data_screen.dart';
+import 'geotag_detail_screen.dart';
 
 class GeotagListScreen extends StatefulWidget {
   const GeotagListScreen({super.key});
@@ -150,7 +151,12 @@ class _GeotagListScreenState extends State<GeotagListScreen> {
                         ),
                         isThreeLine: true,
                         onTap: () {
-                          // Could navigate to detail view if needed
+                          Navigator.push(
+                            context,
+                            MaterialPageRoute(
+                              builder: (_) => GeotagDetailScreen(geotag: geotag),
+                            ),
+                          );
                         },
                       ),
                     );

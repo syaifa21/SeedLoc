@@ -140,4 +140,10 @@ class DatabaseHelper {
     final List<Map<String, dynamic>> maps = await db.query('geotags');
     return List.generate(maps.length, (i) => Geotag.fromMap(maps[i]));
   }
+
+  Future<void> clearAllData() async {
+    Database db = await database;
+    await db.delete('geotags');
+    await db.delete('projects');
+  }
 }
