@@ -27,11 +27,12 @@ class _FieldDataScreenState extends State<FieldDataScreen> {
   bool _isCapturingLocation = false;
   double _progress = 0.0;
   String _accuracyText = 'Akurasi: -- m';
+  String _currentLocationText = 'Lokasi Terkini: --';
   Position? _averagedPosition;
-  String _locationName = 'Lokasi: --';
+  String _locationName = 'Koordinat: --';
 
   Timer? _timer;
-  int _remainingSeconds = 30;
+  int _remainingSeconds = 20;
 
   final List<String> _conditions = ['Baik', 'Cukup', 'Buruk', 'Rusak'];
 
@@ -61,14 +62,15 @@ class _FieldDataScreenState extends State<FieldDataScreen> {
     setState(() {
       _isCapturingLocation = true;
       _progress = 0.0;
-      _remainingSeconds = 30;
+      _remainingSeconds = 20;
       _accuracyText = 'Akurasi: -- m';
+      _currentLocationText = 'Lokasi Terkini: --';
     });
 
     _timer = Timer.periodic(const Duration(seconds: 1), (timer) async {
       setState(() {
         _remainingSeconds--;
-        _progress = (30 - _remainingSeconds) / 30.0;
+        _progress = (20 - _remainingSeconds) / 20.0;
       });
 
       if (_remainingSeconds <= 0) {
@@ -79,6 +81,7 @@ class _FieldDataScreenState extends State<FieldDataScreen> {
           Position currentPos = await LocationService.getCurrentPosition();
           setState(() {
             _accuracyText = 'Akurasi: ${currentPos.accuracy.toStringAsFixed(1)} m';
+            _currentLocationText = 'Lokasi Terkini: ${currentPos.latitude.toStringAsFixed(6)}, ${currentPos.longitude.toStringAsFixed(6)}';
           });
         } catch (e) {
           print('Error mendapatkan posisi saat ini: $e');
@@ -89,7 +92,7 @@ class _FieldDataScreenState extends State<FieldDataScreen> {
 
   Future<void> _finishLocationCapture() async {
     try {
-      List<Position> positions = await LocationService.getAveragedPositions(30);
+      List<Position> positions = await LocationService.getAveragedPositions(20);
       Position averagedPosition = LocationService.calculateAveragePosition(positions);
 
       String locationName = await LocationService.getLocationName(
@@ -99,7 +102,7 @@ class _FieldDataScreenState extends State<FieldDataScreen> {
 
       setState(() {
         _averagedPosition = averagedPosition;
-        _locationName = 'Lokasi: $locationName';
+        _locationName = 'Koordinat: $locationName';
         _isCapturingLocation = false;
       });
     } catch (e) {
@@ -135,7 +138,7 @@ class _FieldDataScreenState extends State<FieldDataScreen> {
       projectId: widget.projectId,
       latitude: _averagedPosition!.latitude,
       longitude: _averagedPosition!.longitude,
-      locationName: _locationName.replaceFirst('Lokasi: ', ''),
+      locationName: _locationName.replaceFirst('Koordinat: ', ''),
       timestamp: DateTime.now().toIso8601String(),
       itemType: _itemTypeController.text,
       condition: _condition,
@@ -159,8 +162,9 @@ class _FieldDataScreenState extends State<FieldDataScreen> {
     setState(() {
       _averagedPosition = null;
       _photoPath = null;
-      _locationName = 'Lokasi: --';
+      _locationName = 'Koordinat: --';
       _accuracyText = 'Akurasi: -- m';
+      _currentLocationText = 'Lokasi Terkini: --';
       _progress = 0.0;
     });
     _detailsController.clear();
@@ -192,11 +196,12 @@ class _FieldDataScreenState extends State<FieldDataScreen> {
                       const SizedBox(height: 10),
                       Text('Waktu tersisa: $_remainingSeconds detik'),
                       Text(_accuracyText),
+                      Text(_currentLocationText),
                       Text(_locationName),
                       const SizedBox(height: 10),
                       ElevatedButton(
                         onPressed: _isCapturingLocation ? null : _startLocationCapture,
-                        child: Text(_isCapturingLocation ? 'Menangkap...' : 'Mulai Penangkapan Lokasi (30d)'),
+                        child: Text(_isCapturingLocation ? 'Menangkap...' : 'Mulai Penangkapan Lokasi (20d)'),
                       ),
                     ],
                   ),
