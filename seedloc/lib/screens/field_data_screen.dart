@@ -32,6 +32,7 @@ class _FieldDataScreenState extends State<FieldDataScreen> {
   String _locationName = 'Koordinat: --';
 
   Timer? _timer;
+  Timer? _continuousLocationTimer;
   int _remainingSeconds = 20;
 
   final List<String> _conditions = ['Baik', 'Cukup', 'Buruk', 'Rusak'];
@@ -39,6 +40,7 @@ class _FieldDataScreenState extends State<FieldDataScreen> {
   @override
   void dispose() {
     _timer?.cancel();
+    _continuousLocationTimer?.cancel();
     _detailsController.dispose();
     _itemTypeController.dispose();
     super.dispose();
@@ -67,6 +69,9 @@ class _FieldDataScreenState extends State<FieldDataScreen> {
       _currentLocationText = 'Lokasi Terkini: --';
     });
 
+    // Start continuous location tracking
+    _startContinuousLocationTracking();
+
     _timer = Timer.periodic(const Duration(seconds: 1), (timer) async {
       setState(() {
         _remainingSeconds--;
@@ -76,15 +81,31 @@ class _FieldDataScreenState extends State<FieldDataScreen> {
       if (_remainingSeconds <= 0) {
         timer.cancel();
         await _finishLocationCapture();
-      } else {
-        try {
-          Position currentPos = await LocationService.getCurrentPosition();
+      }
+    });
+  }
+
+  void _startContinuousLocationTracking() {
+    _continuousLocationTimer = Timer.periodic(const Duration(seconds: 1), (timer) async {
+      if (!_isCapturingLocation) {
+        timer.cancel();
+        return;
+      }
+
+      try {
+        Position currentPos = await LocationService.getCurrentPosition();
+        if (mounted) {
           setState(() {
             _accuracyText = 'Akurasi: ${currentPos.accuracy.toStringAsFixed(1)} m';
             _currentLocationText = 'Lokasi Terkini: ${currentPos.latitude.toStringAsFixed(6)}, ${currentPos.longitude.toStringAsFixed(6)}';
           });
-        } catch (e) {
-          print('Error mendapatkan posisi saat ini: $e');
+        }
+      } catch (e) {
+        if (mounted) {
+          setState(() {
+            _accuracyText = 'Akurasi: Error';
+            _currentLocationText = 'Lokasi Terkini: Error';
+          });
         }
       }
     });
@@ -104,10 +125,15 @@ class _FieldDataScreenState extends State<FieldDataScreen> {
         _averagedPosition = averagedPosition;
         _locationName = 'Koordinat: $locationName';
         _isCapturingLocation = false;
+        _progress = 1.0; // Ensure progress is complete
       });
+
+      // Stop continuous tracking
+      _continuousLocationTimer?.cancel();
     } catch (e) {
       setState(() {
         _isCapturingLocation = false;
+        _progress = 0.0; // Reset progress on error
       });
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('Error menangkap lokasi: $e')),

@@ -108,8 +108,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Project dihentikan. Membuat project baru...')),
       );
-      // Navigate back to home screen which will show project creation
-      Navigator.of(context).pushReplacementNamed('/home');
+      // Force restart the app to refresh state
+      Navigator.of(context).pushNamedAndRemoveUntil('/home', (Route<dynamic> route) => false);
     } catch (e) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('Error menghentikan project: $e')),

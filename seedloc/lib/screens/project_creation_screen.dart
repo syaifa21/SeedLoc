@@ -51,12 +51,8 @@ class _ProjectCreationScreenState extends State<ProjectCreationScreen> {
         const SnackBar(content: Text('Proyek berhasil dibuat')),
       );
 
-      // Navigate to field data screen
-      Navigator.of(context).pushReplacement(
-        MaterialPageRoute(
-          builder: (_) => FieldDataScreen(projectId: project.projectId),
-        ),
-      );
+      // Navigate to home screen (which will show geotag list)
+      Navigator.of(context).pushReplacementNamed('/home');
     } catch (e) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('Error membuat proyek: $e')),
