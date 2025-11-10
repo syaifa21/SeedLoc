@@ -4,6 +4,7 @@ import '../models/geotag.dart';
 import '../database/database_helper.dart';
 
 class SyncService {
+  // TODO: Replace with actual API endpoint when backend is ready
   static const String baseUrl = 'https://your-api-endpoint.com'; // Replace with actual API endpoint
   final Dio _dio = Dio();
 
@@ -21,8 +22,17 @@ class SyncService {
         return true; // Nothing to sync
       }
 
+      // For now, just mark as synced since backend is not ready
+      // TODO: Uncomment when backend is ready
+      /*
       for (var geotag in unsyncedGeotags) {
         await _syncSingleGeotag(geotag);
+        await dbHelper.updateGeotagSyncStatus(geotag.id!, true);
+      }
+      */
+
+      // Temporary: Mark all as synced for offline demo
+      for (var geotag in unsyncedGeotags) {
         await dbHelper.updateGeotagSyncStatus(geotag.id!, true);
       }
 

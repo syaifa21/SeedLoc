@@ -28,7 +28,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
       bool success = await syncService.syncGeotags();
 
       setState(() {
-        _syncStatus = success ? 'Sinkronisasi berhasil' : 'Sinkronisasi gagal';
+        _syncStatus = success ? 'Sinkronisasi berhasil (simulasi offline)' : 'Sinkronisasi gagal';
       });
     } catch (e) {
       setState(() {
@@ -93,7 +93,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 children: [
                   const Text('Sinkronisasi Data', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
                   const SizedBox(height: 10),
-                  const Text('Sinkronkan geotag yang belum tersinkronkan ke REST API'),
+                  const Text('Sinkronkan geotag yang belum tersinkronkan ke database (saat backend siap)'),
                   const SizedBox(height: 10),
                   ElevatedButton(
                     onPressed: _isSyncing ? null : _syncData,
@@ -149,6 +149,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   const SizedBox(height: 10),
                   const Text('SeedLoc v1.0.0'),
                   const Text('Aplikasi Pengumpulan Data Lapangan Geotagging'),
+                  const SizedBox(height: 10),
+                  const Text('Mode: Offline (Database lokal SQLite)'),
+                  const Text('Sinkronisasi: Siap untuk backend'),
                   const SizedBox(height: 10),
                   const Text('Pengembang: Nama Anda'),
                   const Text('Kontak: email.anda@contoh.com'),
