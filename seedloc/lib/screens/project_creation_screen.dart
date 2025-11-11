@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import '../models/project.dart';
 import '../database/database_helper.dart';
 import 'field_data_screen.dart';
+import 'geotag_list_screen.dart';
 
 class ProjectCreationScreen extends StatefulWidget {
   const ProjectCreationScreen({super.key});
@@ -37,7 +38,7 @@ class _ProjectCreationScreenState extends State<ProjectCreationScreen> {
 
     try {
       Project project = Project(
-        projectId: 2222, // Fixed project ID
+        projectId: 210103, // Fixed project ID
         activityName: _activityNameController.text,
         locationName: _locationNameController.text,
         officers: _officersController.text.split(',').map((e) => e.trim()).toList(),
@@ -51,8 +52,10 @@ class _ProjectCreationScreenState extends State<ProjectCreationScreen> {
         const SnackBar(content: Text('Proyek berhasil dibuat')),
       );
 
-      // Navigate to home screen (which will show geotag list)
-      Navigator.of(context).pushReplacementNamed('/home');
+      // Navigate directly to Geotag List Screen
+      Navigator.of(context).pushReplacement(
+        MaterialPageRoute(builder: (_) => const GeotagListScreen()),
+      );
     } catch (e) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('Error membuat proyek: $e')),
@@ -135,8 +138,8 @@ class _ProjectCreationScreenState extends State<ProjectCreationScreen> {
                           borderRadius: BorderRadius.circular(8),
                         ),
                         child: const Text(
-                          'ID Proyek akan otomatis diatur ke 2222.\n'
-                          'Status proyek akan diatur ke "Aktif".',
+                          'Selamat Datang\n'
+                          'SeedLoc',
                           style: TextStyle(fontSize: 14, color: Colors.blue),
                         ),
                       ),

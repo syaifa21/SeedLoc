@@ -113,16 +113,17 @@ class _FieldDataScreenState extends State<FieldDataScreen> {
 
   Future<void> _finishLocationCapture() async {
     try {
-      List<Position> positions = await LocationService.getAveragedPositions(20);
-      Position averagedPosition = LocationService.calculateAveragePosition(positions);
+      // Get high accuracy position with Kalman filter applied
+      Position currentPosition = await LocationService.getCurrentPosition();
+      Position filteredPosition = LocationService.applyKalmanFilter(currentPosition);
 
       String locationName = await LocationService.getLocationName(
-        averagedPosition.latitude,
-        averagedPosition.longitude,
+        filteredPosition.latitude,
+        filteredPosition.longitude,
       );
 
       setState(() {
-        _averagedPosition = averagedPosition;
+        _averagedPosition = filteredPosition;
         _locationName = 'Koordinat: $locationName';
         _isCapturingLocation = false;
         _progress = 1.0; // Ensure progress is complete
@@ -180,8 +181,10 @@ class _FieldDataScreenState extends State<FieldDataScreen> {
       const SnackBar(content: Text('Geotag berhasil disimpan')),
     );
 
-    // Reset form
-    _resetForm();
+    // Navigate back to GeotagListScreen and refresh data
+    if (mounted) {
+      Navigator.of(context).pop(true); // Return true to indicate data was saved
+    }
   }
 
   void _resetForm() {
