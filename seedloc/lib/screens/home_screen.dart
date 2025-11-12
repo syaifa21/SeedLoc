@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'settings_screen.dart';
 import 'project_creation_screen.dart';
 import 'geotag_list_screen.dart';
+import 'map_screen.dart';
 import '../database/database_helper.dart';
 import '../models/project.dart';
 
@@ -39,6 +40,8 @@ class _HomeScreenState extends State<HomeScreen> {
       case 0:
         return const GeotagListScreen();
       case 1:
+        return const MapScreen();
+      case 2:
         return const SettingsScreen();
       default:
         return const GeotagListScreen();
@@ -65,8 +68,12 @@ class _HomeScreenState extends State<HomeScreen> {
                   label: 'Data Lapangan',
                 ),
                 BottomNavigationBarItem(
+                  icon: Icon(Icons.map),
+                  label: 'Peta',
+                ),
+                BottomNavigationBarItem(
                   icon: Icon(Icons.settings),
-                  label: 'Pengaturan & Info',
+                  label: 'Pengaturan',
                 ),
               ],
               currentIndex: _selectedIndex,

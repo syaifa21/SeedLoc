@@ -14,8 +14,55 @@ class SettingsScreen extends StatefulWidget {
 class _SettingsScreenState extends State<SettingsScreen> {
   bool _isSyncing = false;
   bool _isExporting = false;
+  bool _isCheckingConnection = false;
   String _syncStatus = '';
   String _exportStatus = '';
+  String _connectionStatus = 'Belum diperiksa';
+  Map<String, int> _syncStats = {'total': 0, 'synced': 0, 'unsynced': 0};
+
+  @override
+  void initState() {
+    super.initState();
+    _loadSyncStats();
+    _checkApiConnection();
+  }
+
+  Future<void> _loadSyncStats() async {
+    try {
+      SyncService syncService = SyncService();
+      Map<String, int> stats = await syncService.getSyncStats();
+      setState(() {
+        _syncStats = stats;
+      });
+    } catch (e) {
+      print('Error loading sync stats: $e');
+    }
+  }
+
+  Future<void> _checkApiConnection() async {
+    setState(() {
+      _isCheckingConnection = true;
+      _connectionStatus = 'Memeriksa koneksi...';
+    });
+
+    try {
+      SyncService syncService = SyncService();
+      bool isConnected = await syncService.checkConnection();
+      setState(() {
+        _connectionStatus = isConnected 
+            ? '✓ Terhubung ke API' 
+            : '✗ Tidak dapat terhubung ke API';
+      });
+    } catch (e) {
+      setState(() {
+        _connectionStatus = '✗ Error: ${e.toString()}';
+      });
+    } finally {
+      setState(() {
+        _isCheckingConnection = false;
+      });
+    }
+  }
 
   Future<void> _syncData() async {
     setState(() {
@@ -25,15 +72,48 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
     try {
       SyncService syncService = SyncService();
+      
+      // First check connection
+      bool isConnected = await syncService.checkConnection();
+      if (!isConnected) {
+        setState(() {
+          _syncStatus = '✗ Tidak dapat terhubung ke API. Periksa koneksi internet Anda.';
+        });
+        return;
+      }
+
+      // Sync geotags
       bool success = await syncService.syncGeotags();
 
+      // Reload stats
+      await _loadSyncStats();
+
       setState(() {
-        _syncStatus = success ? 'Sinkronisasi berhasil (simulasi offline)' : 'Sinkronisasi gagal';
+        _syncStatus = success 
+            ? '✓ Sinkronisasi berhasil!' 
+            : '⚠ Sinkronisasi selesai dengan beberapa error';
       });
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(success ? 'Data berhasil disinkronkan!' : 'Sinkronisasi selesai dengan error'),
+            backgroundColor: success ? Colors.green : Colors.orange,
+          ),
+        );
+      }
     } catch (e) {
       setState(() {
-        _syncStatus = 'Error sinkronisasi: $e';
+        _syncStatus = '✗ Error sinkronisasi: $e';
       });
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Error: $e'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
     } finally {
       setState(() {
         _isSyncing = false;
@@ -117,6 +197,36 @@ class _SettingsScreenState extends State<SettingsScreen> {
     }
   }
 
+  Widget _buildStatCard(String label, int value, Color color) {
+    return Column(
+      children: [
+        Container(
+          padding: const EdgeInsets.all(16),
+          decoration: BoxDecoration(
+            color: color.withOpacity(0.1),
+            borderRadius: BorderRadius.circular(8),
+          ),
+          child: Text(
+            value.toString(),
+            style: TextStyle(
+              fontSize: 24,
+              fontWeight: FontWeight.bold,
+              color: color,
+            ),
+          ),
+        ),
+        const SizedBox(height: 8),
+        Text(
+          label,
+          style: const TextStyle(
+            fontSize: 12,
+            color: Colors.grey,
+          ),
+        ),
+      ],
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -126,6 +236,64 @@ class _SettingsScreenState extends State<SettingsScreen> {
       body: ListView(
         padding: const EdgeInsets.all(16.0),
         children: [
+          // API Connection Status
+          Card(
+            child: Padding(
+              padding: const EdgeInsets.all(16.0),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      const Text('Status Koneksi API', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+                      IconButton(
+                        icon: const Icon(Icons.refresh),
+                        onPressed: _isCheckingConnection ? null : _checkApiConnection,
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 10),
+                  Text(
+                    _connectionStatus,
+                    style: TextStyle(
+                      color: _connectionStatus.contains('✓') ? Colors.green : Colors.red,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                  const SizedBox(height: 5),
+                  const Text('API: https://seedloc.my.id/api', style: TextStyle(fontSize: 12, color: Colors.grey)),
+                ],
+              ),
+            ),
+          ),
+
+          const SizedBox(height: 20),
+
+          // Sync Statistics
+          Card(
+            child: Padding(
+              padding: const EdgeInsets.all(16.0),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text('Statistik Sinkronisasi', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+                  const SizedBox(height: 15),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceAround,
+                    children: [
+                      _buildStatCard('Total', _syncStats['total']!, Colors.blue),
+                      _buildStatCard('Tersinkron', _syncStats['synced']!, Colors.green),
+                      _buildStatCard('Belum', _syncStats['unsynced']!, Colors.orange),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+          ),
+
+          const SizedBox(height: 20),
+
           // Sync Section
           Card(
             child: Padding(
@@ -135,16 +303,40 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 children: [
                   const Text('Sinkronisasi Data', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
                   const SizedBox(height: 10),
-                  const Text('Sinkronkan geotag yang belum tersinkronkan ke database (saat backend siap)'),
-                  const SizedBox(height: 10),
-                  ElevatedButton(
-                    onPressed: _isSyncing ? null : _syncData,
-                    child: Text(_isSyncing ? 'Menyinkronkan...' : 'Sinkronkan Data'),
+                  Text(
+                    'Sinkronkan ${_syncStats['unsynced']} geotag yang belum tersinkronkan ke server',
+                    style: const TextStyle(color: Colors.grey),
+                  ),
+                  const SizedBox(height: 15),
+                  SizedBox(
+                    width: double.infinity,
+                    child: ElevatedButton.icon(
+                      onPressed: (_isSyncing || _syncStats['unsynced']! == 0) ? null : _syncData,
+                      icon: _isSyncing 
+                          ? const SizedBox(
+                              width: 20,
+                              height: 20,
+                              child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                            )
+                          : const Icon(Icons.cloud_upload),
+                      label: Text(_isSyncing ? 'Menyinkronkan...' : 'Sinkronkan Data'),
+                      style: ElevatedButton.styleFrom(
+                        padding: const EdgeInsets.symmetric(vertical: 12),
+                        backgroundColor: Colors.blue,
+                        foregroundColor: Colors.white,
+                      ),
+                    ),
                   ),
                   if (_syncStatus.isNotEmpty)
                     Padding(
                       padding: const EdgeInsets.only(top: 10),
-                      child: Text(_syncStatus),
+                      child: Text(
+                        _syncStatus,
+                        style: TextStyle(
+                          color: _syncStatus.contains('✓') ? Colors.green : 
+                                 _syncStatus.contains('⚠') ? Colors.orange : Colors.red,
+                        ),
+                      ),
                     ),
                 ],
               ),
