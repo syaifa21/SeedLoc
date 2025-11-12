@@ -36,13 +36,23 @@ class _GeotagListScreenState extends State<GeotagListScreen> {
   }
 
   void _startLocationTracking() {
-    LocationService.startContinuousTracking((Position position) {
-      if (mounted) {
-        setState(() {
-          _currentPosition = position;
-          _currentAccuracy = '${position.accuracy.toStringAsFixed(1)} m';
-          _currentLocationText = '${position.latitude.toStringAsFixed(6)}, ${position.longitude.toStringAsFixed(6)}';
-        });
+    _locationTimer = Timer.periodic(const Duration(seconds: 2), (timer) async {
+      try {
+        Position position = await LocationService.getCurrentPosition();
+        if (mounted) {
+          setState(() {
+            _currentPosition = position;
+            _currentAccuracy = '${position.accuracy.toStringAsFixed(1)} m';
+            _currentLocationText = '${position.latitude.toStringAsFixed(6)}, ${position.longitude.toStringAsFixed(6)}';
+          });
+        }
+      } catch (e) {
+        if (mounted) {
+          setState(() {
+            _currentAccuracy = 'Error';
+            _currentLocationText = 'Error';
+          });
+        }
       }
     });
   }

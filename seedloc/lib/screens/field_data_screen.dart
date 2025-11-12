@@ -64,23 +64,41 @@ class _FieldDataScreenState extends State<FieldDataScreen> {
     setState(() {
       _isCapturingLocation = true;
       _progress = 0.0;
-      _remainingSeconds = 20;
+      _remainingSeconds = 30; // Max time to prevent infinite loop
       _accuracyText = 'Akurasi: -- m';
       _currentLocationText = 'Lokasi Terkini: --';
     });
 
-    // Start continuous location tracking
+    // Start continuous location tracking for UI updates
     _startContinuousLocationTracking();
 
+    // Initialize list to collect positions for averaging
+    List<Position> capturedPositions = [];
+
     _timer = Timer.periodic(const Duration(seconds: 1), (timer) async {
+      try {
+        Position position = await LocationService.getCurrentPosition();
+        capturedPositions.add(position);
+
+        // Check if accuracy is good enough (between 1m and 5m)
+        if (position.accuracy >= 1.0 && position.accuracy <= 5.0) {
+          timer.cancel();
+          await _finishLocationCapture(capturedPositions);
+          return;
+        }
+      } catch (e) {
+        // Handle error if needed
+      }
+
       setState(() {
         _remainingSeconds--;
-        _progress = (20 - _remainingSeconds) / 20.0;
+        _progress = (_remainingSeconds > 0) ? (30 - _remainingSeconds) / 30.0 : 1.0;
       });
 
+      // Stop after max time if accuracy not reached
       if (_remainingSeconds <= 0) {
         timer.cancel();
-        await _finishLocationCapture();
+        await _finishLocationCapture(capturedPositions);
       }
     });
   }
@@ -111,11 +129,13 @@ class _FieldDataScreenState extends State<FieldDataScreen> {
     });
   }
 
-  Future<void> _finishLocationCapture() async {
+  Future<void> _finishLocationCapture(List<Position> capturedPositions) async {
     try {
-      // Get high accuracy position with Kalman filter applied
-      Position currentPosition = await LocationService.getCurrentPosition();
-      Position filteredPosition = LocationService.applyKalmanFilter(currentPosition);
+      // Calculate average position from captured positions
+      Position averagedPosition = LocationService.calculateAveragePosition(capturedPositions);
+
+      // Apply Kalman filter to the averaged position
+      Position filteredPosition = LocationService.applyKalmanFilter(averagedPosition);
 
       String locationName = await LocationService.getLocationName(
         filteredPosition.latitude,
