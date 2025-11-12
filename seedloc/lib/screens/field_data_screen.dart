@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:math';
 import 'package:flutter/material.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:permission_handler/permission_handler.dart';
@@ -138,35 +139,151 @@ class _FieldDataScreenState extends State<FieldDataScreen> {
 
   Future<void> _finishLocationCapture(List<Position> capturedPositions) async {
     try {
-      // Calculate average position from captured positions
-      Position averagedPosition = LocationService.calculateAveragePosition(capturedPositions);
+      // Step 1: Remove outliers using IQR method
+      List<Position> filteredPositions = _removeOutliers(capturedPositions);
+      
+      // Step 2: Calculate weighted average (better accuracy = higher weight)
+      Position weightedPosition = _calculateWeightedAverage(filteredPositions);
 
-      // Apply Kalman filter to the averaged position
-      Position filteredPosition = LocationService.applyKalmanFilter(averagedPosition);
+      // Step 3: Apply Kalman filter for final smoothing
+      Position finalPosition = LocationService.applyKalmanFilter(weightedPosition);
 
       String locationName = await LocationService.getLocationName(
-        filteredPosition.latitude,
-        filteredPosition.longitude,
+        finalPosition.latitude,
+        finalPosition.longitude,
       );
 
       setState(() {
-        _averagedPosition = filteredPosition;
+        _averagedPosition = finalPosition;
         _locationName = 'Koordinat: $locationName';
         _isCapturingLocation = false;
-        _progress = 1.0; // Ensure progress is complete
+        _progress = 1.0;
       });
 
       // Stop continuous tracking
       _continuousLocationTimer?.cancel();
+      
+      // Show success message with accuracy info
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              'Lokasi berhasil ditangkap! Akurasi: ${finalPosition.accuracy.toStringAsFixed(1)}m '
+              '(dari ${capturedPositions.length} sampel, ${filteredPositions.length} digunakan)'
+            ),
+            backgroundColor: Colors.green,
+          ),
+        );
+      }
     } catch (e) {
       setState(() {
         _isCapturingLocation = false;
-        _progress = 0.0; // Reset progress on error
+        _progress = 0.0;
       });
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('Error menangkap lokasi: $e')),
       );
     }
+  }
+
+  // Remove outliers using Interquartile Range (IQR) method
+  List<Position> _removeOutliers(List<Position> positions) {
+    if (positions.length < 4) {
+      return positions; // Not enough data for outlier detection
+    }
+
+    // Calculate median position
+    List<double> latitudes = positions.map((p) => p.latitude).toList()..sort();
+    List<double> longitudes = positions.map((p) => p.longitude).toList()..sort();
+
+    double medianLat = _calculateMedian(latitudes);
+    double medianLng = _calculateMedian(longitudes);
+
+    // Calculate distances from median
+    List<double> distances = positions.map((p) {
+      double latDiff = p.latitude - medianLat;
+      double lngDiff = p.longitude - medianLng;
+      return sqrt(latDiff * latDiff + lngDiff * lngDiff);
+    }).toList();
+
+    // Calculate IQR
+    List<double> sortedDistances = List.from(distances)..sort();
+    double q1 = _calculateMedian(sortedDistances.sublist(0, sortedDistances.length ~/ 2));
+    double q3 = _calculateMedian(sortedDistances.sublist(sortedDistances.length ~/ 2));
+    double iqr = q3 - q1;
+    double threshold = q3 + 1.5 * iqr;
+
+    // Filter outliers
+    List<Position> filtered = [];
+    for (int i = 0; i < positions.length; i++) {
+      if (distances[i] <= threshold) {
+        filtered.add(positions[i]);
+      }
+    }
+
+    return filtered.isEmpty ? positions : filtered;
+  }
+
+  double _calculateMedian(List<double> values) {
+    if (values.isEmpty) return 0;
+    int middle = values.length ~/ 2;
+    if (values.length % 2 == 0) {
+      return (values[middle - 1] + values[middle]) / 2;
+    } else {
+      return values[middle];
+    }
+  }
+
+  // Calculate weighted average based on accuracy (better accuracy = higher weight)
+  Position _calculateWeightedAverage(List<Position> positions) {
+    if (positions.isEmpty) {
+      throw Exception('No positions to average');
+    }
+
+    if (positions.length == 1) {
+      return positions.first;
+    }
+
+    double totalWeight = 0;
+    double weightedLat = 0;
+    double weightedLng = 0;
+    double totalAccuracy = 0;
+
+    // Calculate weights (inverse of accuracy squared)
+    for (var pos in positions) {
+      // Weight = 1 / (accuracy^2)
+      // Better accuracy (smaller value) = higher weight
+      double weight = 1.0 / (pos.accuracy * pos.accuracy);
+      totalWeight += weight;
+      weightedLat += pos.latitude * weight;
+      weightedLng += pos.longitude * weight;
+      totalAccuracy += pos.accuracy;
+    }
+
+    // Calculate weighted average
+    double avgLat = weightedLat / totalWeight;
+    double avgLng = weightedLng / totalWeight;
+    
+    // Calculate improved accuracy estimate
+    // Use the best accuracy from filtered positions
+    double bestAccuracy = positions.map((p) => p.accuracy).reduce((a, b) => a < b ? a : b);
+    double avgAccuracy = totalAccuracy / positions.length;
+    
+    // Final accuracy is weighted between best and average (70% best, 30% average)
+    double finalAccuracy = (bestAccuracy * 0.7 + avgAccuracy * 0.3);
+
+    return Position(
+      latitude: avgLat,
+      longitude: avgLng,
+      timestamp: DateTime.now(),
+      accuracy: finalAccuracy,
+      altitude: positions.last.altitude,
+      heading: positions.last.heading,
+      speed: positions.last.speed,
+      speedAccuracy: positions.last.speedAccuracy,
+      altitudeAccuracy: positions.last.altitudeAccuracy,
+      headingAccuracy: positions.last.headingAccuracy,
+    );
   }
 
   Future<void> _takePhoto() async {
