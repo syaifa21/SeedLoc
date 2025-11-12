@@ -64,7 +64,6 @@ class _FieldDataScreenState extends State<FieldDataScreen> {
     setState(() {
       _isCapturingLocation = true;
       _progress = 0.0;
-      _remainingSeconds = 30; // Max time to prevent infinite loop
       _accuracyText = 'Akurasi: -- m';
       _currentLocationText = 'Lokasi Terkini: --';
     });
@@ -74,11 +73,25 @@ class _FieldDataScreenState extends State<FieldDataScreen> {
 
     // Initialize list to collect positions for averaging
     List<Position> capturedPositions = [];
+    bool hasShownAccuracyWarning = false;
 
     _timer = Timer.periodic(const Duration(seconds: 1), (timer) async {
       try {
         Position position = await LocationService.getCurrentPosition();
         capturedPositions.add(position);
+
+        // Show notification if accuracy is above 5 meters
+        if (position.accuracy > 5.0 && !hasShownAccuracyWarning) {
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                content: Text('Akurasi GPS di atas 5 meter. Tunggu hingga akurasi membaik...'),
+                duration: Duration(seconds: 3),
+              ),
+            );
+          }
+          hasShownAccuracyWarning = true;
+        }
 
         // Check if accuracy is good enough (between 1m and 5m)
         if (position.accuracy >= 1.0 && position.accuracy <= 5.0) {
@@ -90,16 +103,10 @@ class _FieldDataScreenState extends State<FieldDataScreen> {
         // Handle error if needed
       }
 
+      // Update progress to show waiting animation
       setState(() {
-        _remainingSeconds--;
-        _progress = (_remainingSeconds > 0) ? (30 - _remainingSeconds) / 30.0 : 1.0;
+        _progress = (_progress + 0.1) % 1.0; // Continuous progress animation
       });
-
-      // Stop after max time if accuracy not reached
-      if (_remainingSeconds <= 0) {
-        timer.cancel();
-        await _finishLocationCapture(capturedPositions);
-      }
     });
   }
 
@@ -179,6 +186,14 @@ class _FieldDataScreenState extends State<FieldDataScreen> {
       return;
     }
 
+    // Check if accuracy is within required range (1-5 meters)
+    if (_averagedPosition!.accuracy < 1.0 || _averagedPosition!.accuracy > 5.0) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Akurasi lokasi tidak memenuhi syarat (harus 1-5 meter)')),
+      );
+      return;
+    }
+
     String deviceId = await _getDeviceId();
 
     Geotag geotag = Geotag(
@@ -243,14 +258,14 @@ class _FieldDataScreenState extends State<FieldDataScreen> {
                       const SizedBox(height: 10),
                       LinearProgressIndicator(value: _progress),
                       const SizedBox(height: 10),
-                      Text('Waktu tersisa: $_remainingSeconds detik'),
+                      Text(_isCapturingLocation ? 'Menunggu akurasi GPS di bawah 5 meter...' : 'Siap untuk menangkap lokasi'),
                       Text(_accuracyText),
                       Text(_currentLocationText),
                       Text(_locationName),
                       const SizedBox(height: 10),
                       ElevatedButton(
                         onPressed: _isCapturingLocation ? null : _startLocationCapture,
-                        child: Text(_isCapturingLocation ? 'Menangkap...' : 'Mulai Penangkapan Lokasi (20d)'),
+                        child: Text(_isCapturingLocation ? 'Menangkap...' : 'Mulai Penangkapan Lokasi'),
                       ),
                     ],
                   ),
