@@ -109,6 +109,19 @@ class _MapScreenState extends State<MapScreen> {
                 maxZoom: 19,
                 // Tiles akan di-cache otomatis oleh flutter_map
                 // Saat offline, tiles yang sudah di-cache akan tetap muncul
+                
+                // Subdomains untuk load balancing (meningkatkan kecepatan loading)
+                subdomains: const ['a', 'b', 'c'],
+                
+                // Fallback tile - tampilkan tile kosong dengan border jika gagal
+                tileBuilder: (context, tileWidget, tile) {
+                  return Container(
+                    decoration: BoxDecoration(
+                      border: Border.all(color: Colors.grey.shade300, width: 0.5),
+                    ),
+                    child: tileWidget,
+                  );
+                },
               ),
               
               // Marker untuk lokasi terkini

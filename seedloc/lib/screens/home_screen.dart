@@ -5,6 +5,7 @@ import 'geotag_list_screen.dart';
 import 'map_screen.dart';
 import '../database/database_helper.dart';
 import '../models/project.dart';
+import '../services/background_location_service.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -21,6 +22,19 @@ class _HomeScreenState extends State<HomeScreen> {
   void initState() {
     super.initState();
     _checkProjectExists();
+    _startBackgroundTracking();
+  }
+
+  @override
+  void dispose() {
+    // Stop background tracking when app closes
+    BackgroundLocationService().stopTracking();
+    super.dispose();
+  }
+
+  Future<void> _startBackgroundTracking() async {
+    // Start continuous background location tracking
+    await BackgroundLocationService().startTracking();
   }
 
   Future<void> _checkProjectExists() async {

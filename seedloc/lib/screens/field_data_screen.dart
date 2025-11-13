@@ -6,6 +6,7 @@ import 'package:permission_handler/permission_handler.dart';
 import '../models/geotag.dart';
 import '../database/database_helper.dart';
 import '../services/location_service.dart';
+import '../services/background_location_service.dart';
 import '../services/image_service.dart';
 import 'package:device_info_plus/device_info_plus.dart';
 
@@ -31,20 +32,45 @@ class _FieldDataScreenState extends State<FieldDataScreen> {
   String _currentLocationText = 'Lokasi Terkini: --';
   Position? _averagedPosition;
   String _locationName = 'Koordinat: --';
+  String _samplesInfo = 'Sampel: 0';
 
   Timer? _timer;
-  Timer? _continuousLocationTimer;
-  int _remainingSeconds = 20;
+  Timer? _uiUpdateTimer;
 
   final List<String> _conditions = ['Baik', 'Cukup', 'Buruk', 'Rusak'];
+  final BackgroundLocationService _bgLocationService = BackgroundLocationService();
+
+  @override
+  void initState() {
+    super.initState();
+    _startUIUpdates();
+  }
 
   @override
   void dispose() {
     _timer?.cancel();
-    _continuousLocationTimer?.cancel();
+    _uiUpdateTimer?.cancel();
     _detailsController.dispose();
     _itemTypeController.dispose();
     super.dispose();
+  }
+
+  void _startUIUpdates() {
+    // Update UI every second with background service data
+    _uiUpdateTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
+      if (!mounted) return;
+
+      var stats = _bgLocationService.getStatistics();
+      Position? currentPos = _bgLocationService.currentBestPosition;
+
+      setState(() {
+        if (currentPos != null) {
+          _accuracyText = 'Akurasi: ${currentPos.accuracy.toStringAsFixed(1)} m';
+          _currentLocationText = 'Lat: ${currentPos.latitude.toStringAsFixed(6)}, Lng: ${currentPos.longitude.toStringAsFixed(6)}';
+          _samplesInfo = 'Sampel: ${stats['totalSamples']} | Terbaik: ${stats['bestAccuracy'].toStringAsFixed(1)}m';
+        }
+      });
+    });
   }
 
   Future<void> _requestPermissions() async {
@@ -59,129 +85,101 @@ class _FieldDataScreenState extends State<FieldDataScreen> {
     return androidInfo.id;
   }
 
-  Future<void> _startLocationCapture() async {
+  Future<void> _captureLocation() async {
     await _requestPermissions();
 
     setState(() {
       _isCapturingLocation = true;
       _progress = 0.0;
-      _accuracyText = 'Akurasi: -- m';
-      _currentLocationText = 'Lokasi Terkini: --';
+      _samplesInfo = 'Sampel: 0';
     });
 
-    // Start continuous location tracking for UI updates
-    _startContinuousLocationTracking();
+    List<Position> samples = [];
+    int maxSamples = 5;
+    int sampleCount = 0;
 
-    // Initialize list to collect positions for averaging
-    List<Position> capturedPositions = [];
-    bool hasShownAccuracyWarning = false;
-
-    _timer = Timer.periodic(const Duration(seconds: 1), (timer) async {
-      try {
-        Position position = await LocationService.getCurrentPosition();
-        capturedPositions.add(position);
-
-        // Show notification if accuracy is above 5 meters
-        if (position.accuracy > 5.0 && !hasShownAccuracyWarning) {
-          if (mounted) {
-            ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(
-                content: Text('Akurasi GPS di atas 5 meter. Tunggu hingga akurasi membaik...'),
-                duration: Duration(seconds: 3),
-              ),
-            );
-          }
-          hasShownAccuracyWarning = true;
-        }
-
-        // Check if accuracy is good enough (between 1m and 5m)
-        if (position.accuracy >= 1.0 && position.accuracy <= 5.0) {
-          timer.cancel();
-          await _finishLocationCapture(capturedPositions);
-          return;
-        }
-      } catch (e) {
-        // Handle error if needed
-      }
-
-      // Update progress to show waiting animation
-      setState(() {
-        _progress = (_progress + 0.1) % 1.0; // Continuous progress animation
-      });
-    });
-  }
-
-  void _startContinuousLocationTracking() {
-    _continuousLocationTimer = Timer.periodic(const Duration(seconds: 1), (timer) async {
-      if (!_isCapturingLocation) {
-        timer.cancel();
-        return;
-      }
-
-      try {
-        Position currentPos = await LocationService.getCurrentPosition();
-        if (mounted) {
-          setState(() {
-            _accuracyText = 'Akurasi: ${currentPos.accuracy.toStringAsFixed(1)} m';
-            _currentLocationText = 'Lokasi Terkini: ${currentPos.latitude.toStringAsFixed(6)}, ${currentPos.longitude.toStringAsFixed(6)}';
-          });
-        }
-      } catch (e) {
-        if (mounted) {
-          setState(() {
-            _accuracyText = 'Akurasi: Error';
-            _currentLocationText = 'Lokasi Terkini: Error';
-          });
-        }
-      }
-    });
-  }
-
-  Future<void> _finishLocationCapture(List<Position> capturedPositions) async {
     try {
-      // Step 1: Remove outliers using IQR method
-      List<Position> filteredPositions = _removeOutliers(capturedPositions);
-      
-      // Step 2: Calculate weighted average (better accuracy = higher weight)
-      Position weightedPosition = _calculateWeightedAverage(filteredPositions);
+      // Ambil sampel GPS setiap 1 detik
+      _timer = Timer.periodic(const Duration(seconds: 1), (timer) async {
+        try {
+          Position position = await LocationService.getCurrentPosition();
+          samples.add(position);
+          sampleCount++;
 
-      // Step 3: Apply Kalman filter for final smoothing
-      Position finalPosition = LocationService.applyKalmanFilter(weightedPosition);
+          if (mounted) {
+            setState(() {
+              _progress = sampleCount / maxSamples;
+              _samplesInfo = 'Sampel: $sampleCount/$maxSamples';
+              _accuracyText = 'Akurasi: ${position.accuracy.toStringAsFixed(1)} m';
+              _currentLocationText = 'Lat: ${position.latitude.toStringAsFixed(6)}, Lng: ${position.longitude.toStringAsFixed(6)}';
+            });
+          }
 
-      String locationName = await LocationService.getLocationName(
-        finalPosition.latitude,
-        finalPosition.longitude,
-      );
+          // Jika dapat akurasi < 5m, langsung selesai!
+          if (position.accuracy < 5.0) {
+            timer.cancel();
+            await _finishCapture(samples, sampleCount);
+            return;
+          }
 
-      setState(() {
-        _averagedPosition = finalPosition;
-        _locationName = 'Koordinat: $locationName';
-        _isCapturingLocation = false;
-        _progress = 1.0;
+          // Atau jika sudah 5 sampel, selesai
+          if (sampleCount >= maxSamples) {
+            timer.cancel();
+            await _finishCapture(samples, sampleCount);
+          }
+        } catch (e) {
+          print('Error getting sample: $e');
+        }
       });
-
-      // Stop continuous tracking
-      _continuousLocationTimer?.cancel();
-      
-      // Show success message with accuracy info
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(
-              'Lokasi berhasil ditangkap! Akurasi: ${finalPosition.accuracy.toStringAsFixed(1)}m '
-              '(dari ${capturedPositions.length} sampel, ${filteredPositions.length} digunakan)'
-            ),
-            backgroundColor: Colors.green,
-          ),
-        );
-      }
     } catch (e) {
       setState(() {
         _isCapturingLocation = false;
         _progress = 0.0;
       });
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Error menangkap lokasi: $e')),
+        SnackBar(content: Text('Error: $e')),
+      );
+    }
+  }
+
+  Future<void> _finishCapture(List<Position> samples, int sampleCount) async {
+    if (samples.isEmpty) {
+      setState(() {
+        _isCapturingLocation = false;
+      });
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Gagal mendapatkan lokasi')),
+      );
+      return;
+    }
+
+    // Remove outliers dan hitung weighted average
+    List<Position> filtered = _removeOutliers(samples);
+    Position averaged = _calculateWeightedAverage(filtered);
+
+    // Get location name
+    String locationName = await LocationService.getLocationName(
+      averaged.latitude,
+      averaged.longitude,
+    );
+
+    setState(() {
+      _averagedPosition = averaged;
+      _locationName = 'Koordinat: $locationName';
+      _isCapturingLocation = false;
+      _progress = 1.0;
+    });
+
+    // Show success message
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            'Lokasi ditangkap! Akurasi: ${averaged.accuracy.toStringAsFixed(1)}m (dari $sampleCount sampel)'
+          ),
+          backgroundColor: Colors.green,
+          duration: const Duration(seconds: 3),
+        ),
       );
     }
   }
@@ -371,18 +369,80 @@ class _FieldDataScreenState extends State<FieldDataScreen> {
                   padding: const EdgeInsets.all(16.0),
                   child: Column(
                     children: [
-                      const Text('Penangkapan Lokasi', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+                      Row(
+                        children: [
+                          const Icon(Icons.location_on, color: Colors.blue),
+                          const SizedBox(width: 8),
+                          const Text('Penangkapan Lokasi', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+                          const Spacer(),
+                          Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                            decoration: BoxDecoration(
+                              color: _bgLocationService.isTracking ? Colors.green.shade100 : Colors.grey.shade200,
+                              borderRadius: BorderRadius.circular(12),
+                            ),
+                            child: Row(
+                              children: [
+                                Icon(
+                                  Icons.circle,
+                                  size: 8,
+                                  color: _bgLocationService.isTracking ? Colors.green : Colors.grey,
+                                ),
+                                const SizedBox(width: 4),
+                                Text(
+                                  _bgLocationService.isTracking ? 'Live' : 'Off',
+                                  style: TextStyle(
+                                    fontSize: 10,
+                                    fontWeight: FontWeight.bold,
+                                    color: _bgLocationService.isTracking ? Colors.green : Colors.grey,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ],
+                      ),
                       const SizedBox(height: 10),
-                      LinearProgressIndicator(value: _progress),
+                      if (_progress > 0) LinearProgressIndicator(value: _progress),
                       const SizedBox(height: 10),
-                      Text(_isCapturingLocation ? 'Menunggu akurasi GPS di bawah 5 meter...' : 'Siap untuk menangkap lokasi'),
-                      Text(_accuracyText),
-                      Text(_currentLocationText),
-                      Text(_locationName),
+                      Container(
+                        padding: const EdgeInsets.all(12),
+                        decoration: BoxDecoration(
+                          color: Colors.blue.shade50,
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Row(
+                              children: [
+                                const Icon(Icons.info_outline, size: 16, color: Colors.blue),
+                                const SizedBox(width: 4),
+                                const Text('Status Real-time', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12)),
+                              ],
+                            ),
+                            const SizedBox(height: 8),
+                            Text(_accuracyText, style: const TextStyle(fontSize: 12)),
+                            Text(_currentLocationText, style: const TextStyle(fontSize: 12)),
+                            Text(_samplesInfo, style: const TextStyle(fontSize: 12)),
+                            if (_locationName != 'Koordinat: --')
+                              Text(_locationName, style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
+                          ],
+                        ),
+                      ),
                       const SizedBox(height: 10),
-                      ElevatedButton(
-                        onPressed: _isCapturingLocation ? null : _startLocationCapture,
-                        child: Text(_isCapturingLocation ? 'Menangkap...' : 'Mulai Penangkapan Lokasi'),
+                      SizedBox(
+                        width: double.infinity,
+                        child: ElevatedButton.icon(
+                          onPressed: _isCapturingLocation ? null : _captureLocation,
+                          icon: Icon(_isCapturingLocation ? Icons.hourglass_empty : Icons.my_location),
+                          label: Text(_isCapturingLocation ? 'Memproses...' : 'Gunakan Lokasi Terkini'),
+                          style: ElevatedButton.styleFrom(
+                            padding: const EdgeInsets.symmetric(vertical: 12),
+                            backgroundColor: Colors.blue,
+                            foregroundColor: Colors.white,
+                          ),
+                        ),
                       ),
                     ],
                   ),

@@ -83,22 +83,25 @@ class _SettingsScreenState extends State<SettingsScreen> {
       }
 
       // Sync geotags
-      bool success = await syncService.syncGeotags();
+      Map<String, dynamic> result = await syncService.syncGeotags();
 
       // Reload stats
       await _loadSyncStats();
 
       setState(() {
-        _syncStatus = success 
-            ? '✓ Sinkronisasi berhasil!' 
-            : '⚠ Sinkronisasi selesai dengan beberapa error';
+        _syncStatus = result['success'] 
+            ? '✓ Sinkronisasi berhasil! (${result['synced']} data)' 
+            : '⚠ ${result['message']} (${result['synced']} berhasil, ${result['failed']} gagal)';
       });
 
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text(success ? 'Data berhasil disinkronkan!' : 'Sinkronisasi selesai dengan error'),
-            backgroundColor: success ? Colors.green : Colors.orange,
+            content: Text(result['success'] 
+                ? 'Data berhasil disinkronkan! (${result['synced']} data)' 
+                : '${result['message']} (${result['synced']} berhasil, ${result['failed']} gagal)'),
+            backgroundColor: result['success'] ? Colors.green : Colors.orange,
+            duration: const Duration(seconds: 4),
           ),
         );
       }
