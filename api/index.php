@@ -158,11 +158,11 @@ switch($path) {
         break;
         
     case 'upload':
-        // Handle photo upload (VALIDASI TIPE FILE DIHAPUS)
+        // Handle photo upload (TIPE FILE DIHAPUS, MENGGUNAKAN NAMA DARI KLIEN)
         if ($method === 'POST' && isset($_FILES['photo'])) {
             $uploadDir = 'uploads/';
             
-            // 1. PENANGANAN DIREKTORI & IZIN (CRITICAL)
+            // 1. PENANGANAN DIREKTORI & IZIN
             if (!file_exists($uploadDir)) {
                 if (!mkdir($uploadDir, 0755, true)) { // Mencoba membuat direktori
                     http_response_code(500);
@@ -203,21 +203,18 @@ switch($path) {
                 break;
             }
             
-            // --- VALIDASI TIPE FILE DIHAPUS DI SINI ---
-            // Baris 3. VALIDASI TIPE FILE (dihapus untuk menerima semua jenis file)
-            
-            // 4. PENAMAAN UNIK DAN PATH
-            $fileExtension = pathinfo($file['name'], PATHINFO_EXTENSION);
-            // Menghasilkan nama file unik berdasarkan waktu dan id unik
-            $fileName = time() . '_' . uniqid() . '.' . $fileExtension;
+            // 3. MENGGUNAKAN NAMA FILE DARI KLIEN UNTUK EXTENSION
+            // Perhatian: Flutter mengirim nama file dengan format "customFileName.jpg"
+            $fileName = $file['name']; 
             $targetPath = $uploadDir . $fileName;
             
-            // 5. MEMINDAHKAN FILE UPLOAD
+            // 4. MEMINDAHKAN FILE UPLOAD
             if (move_uploaded_file($file['tmp_name'], $targetPath)) {
                 echo json_encode([
                     'success' => true,
                     'message' => 'Photo uploaded successfully.',
                     'path' => $targetPath,
+                    // URL disesuaikan dengan domain Anda
                     'url' => 'https://seedloc.my.id/api/' . $targetPath
                 ]);
             } else {

@@ -284,7 +284,23 @@ class _FieldDataScreenState extends State<FieldDataScreen> {
     );
   }
 
-  // --- FUNGSI WATERMARK DAN PENGAMBILAN FOTO BARU ---
+  // --- FUNGSI BARU UNTUK NAMA FILE (SASARAN UTAMA) ---
+  String _buildPhotoFileName() {
+    final DateTime now = DateTime.now();
+    // Format YYYYMMDD_HHMMSS
+    final String formattedDateTime = '${now.year}${now.month.toString().padLeft(2, '0')}${now.day.toString().padLeft(2, '0')}_'
+                                     '${now.hour.toString().padLeft(2, '0')}${now.minute.toString().padLeft(2, '0')}${now.second.toString().padLeft(2, '0')}';
+    
+    // Menghilangkan spasi dan karakter non-alphanumeric dari nama
+    final String safeItemType = _itemTypeController.text.replaceAll(RegExp(r'[^a-zA-Z0-9_]'), '_');
+    final String safeCondition = _condition.replaceAll(RegExp(r'[^a-zA-Z0-9_]'), '_');
+    
+    // Format Final: NamaPohon_Kondisi_YYYYMMDD_HHMMSS
+    return '${safeItemType}_${safeCondition}_$formattedDateTime'; 
+  }
+  // --- AKHIR FUNGSI NAMA FILE BARU ---
+
+  // FUNGSI WATERMARK ASLI
   String _buildGeotagWatermarkInfo() {
     final DateTime now = DateTime.now();
     final String formattedDate = '${now.day}/${now.month}/${now.year} ${now.hour}:${now.minute.toString().padLeft(2, '0')}:${now.second.toString().padLeft(2, '0')}';
@@ -308,10 +324,13 @@ class _FieldDataScreenState extends State<FieldDataScreen> {
     
     // 1. Siapkan teks Watermark
     final String geotagInfo = _buildGeotagWatermarkInfo();
+    // 2. Siapkan NAMA FILE BARU
+    final String customFileName = _buildPhotoFileName();
     
-    // 2. Ambil dan Stamp Foto (ImageService harus diupdate untuk stamping)
+    // 3. Ambil dan Stamp Foto (ImageService diupdate untuk menerima nama file)
     String? photoPath = await ImageService.pickImage(
       geotagInfo: geotagInfo, 
+      customFileName: customFileName, // Meneruskan nama file baru
       tempPath: 'unused_path' // Variabel dummy, Path sudah dihandle di ImageService
     );
     
@@ -321,8 +340,6 @@ class _FieldDataScreenState extends State<FieldDataScreen> {
       });
     }
   }
-  // --- AKHIR FUNGSI WATERMARK DAN PENGAMBILAN FOTO BARU ---
-
 
   Future<void> _saveGeotag() async {
     if (!_formKey.currentState!.validate() || _averagedPosition == null) {
@@ -383,6 +400,8 @@ class _FieldDataScreenState extends State<FieldDataScreen> {
 
   @override
   Widget build(BuildContext context) {
+    // ... (Sisa kode build)
+    // Tampilan widget tetap sama
     return Scaffold(
       appBar: AppBar(
         title: const Text('Pengumpulan Data Lapangan'),
