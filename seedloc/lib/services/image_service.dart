@@ -13,11 +13,23 @@ class ImageService {
       if (image != null) {
         final String rawImagePath = image.path;
         
-        // Stamping Foto
-        final String stampedImagePath = await _stampImageWithGeotagData(rawImagePath, geotagInfo);
+        // --- NEW LOGIC: Ensure image is decoded/converted to avoid HEIC/HEIF issues ---
+        // Baca gambar dari file mentah
+        final File rawFile = File(rawImagePath);
+        img.Image? originalImage = img.decodeImage(await rawFile.readAsBytes());
         
-        // Hapus foto mentah yang diambil kamera (XFile)
-        await File(rawImagePath).delete();
+        if (originalImage == null) {
+            print('Error: Could not decode image from path: $rawImagePath');
+            // Hapus file mentah jika decoding gagal
+            await rawFile.delete();
+            return null;
+        }
+
+        // 1. Konversi dan Stamping Foto (Format akan menjadi JPEG saat disimpan)
+        final String stampedImagePath = await _stampImageWithGeotagData(originalImage, geotagInfo, rawImagePath);
+        
+        // 2. Hapus foto mentah yang diambil kamera (XFile)
+        await rawFile.delete();
 
         return stampedImagePath;
       }
@@ -27,15 +39,8 @@ class ImageService {
     return null;
   }
   
-  static Future<String> _stampImageWithGeotagData(String rawImagePath, String geotagInfo) async {
-    // Baca gambar dari file mentah
-    final File rawFile = File(rawImagePath);
-    img.Image? originalImage = img.decodeImage(await rawFile.readAsBytes());
-    
-    if (originalImage == null) {
-      return rawImagePath;
-    }
-    
+  // Mengubah parameter rawImagePath menjadi originalImage (sudah di-decode)
+  static Future<String> _stampImageWithGeotagData(img.Image originalImage, String geotagInfo, String rawImagePathForLogging) async {
     // Menggunakan font yang paling dasar
     final img.BitmapFont font = img.arial14;
     
@@ -63,19 +68,15 @@ class ImageService {
     int currentY = startY + 8; // Padding atas
     
     for (String line in lines) {
-      // --- KOREKSI drawString FINAL ---
-      // Arg 1 (Positional): Image
-      // Arg 2 (Positional): String (text)
-      // Arg named: font, x, y, color
+      // Menambahkan string watermark
       img.drawString(
         originalImage, 
-        line, // Positional Arg 2: String text
-        font: font, // Named Arg: required BitmapFont
-        x: 10, // Named Arg: int? x
-        y: currentY, // Named Arg: int? y
-        color: fontColor, // Named Arg: Color? color
+        line,
+        font: font,
+        x: 10,
+        y: currentY,
+        color: fontColor,
       );
-      // --- AKHIR KOREKSI ---
 
       currentY += lineHeight; // Pindah ke baris berikutnya
     }
@@ -89,10 +90,11 @@ class ImageService {
       await imagesDir.create(recursive: true);
     }
     
-    // Generate unique filename dan simpan gambar yang sudah di-stamp
-    final String fileName = 'STAMPED_${DateTime.now().millisecondsSinceEpoch}.jpg';
+    // Generate unique filename dan simpan gambar yang sudah di-stamp dalam format JPEG
+    final String fileName = 'STAMPED_${DateTime.now().millisecondsSinceEpoch}.jpg'; // EXTENSION .jpg DIPASTIKAN
     final String filePath = path.join(imagesDirPath, fileName);
     
+    // Simpan dalam format JPEG
     await File(filePath).writeAsBytes(img.encodeJpg(originalImage, quality: 90));
 
     return filePath;

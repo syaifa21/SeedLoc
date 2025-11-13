@@ -8,8 +8,6 @@ import '../database/database_helper.dart';
 
 class SyncService {
   // IMPORTANT: Ganti dengan URL server Anda
-  // Untuk testing lokal: http://localhost:8000
-  // Untuk production: https://your-domain.com
   static const String baseUrl = 'https://seedloc.my.id/api';
   
   final Dio _dio = Dio();
@@ -27,6 +25,7 @@ class SyncService {
   Future<bool> testConnection() async {
     try {
       final response = await _dio.get('$baseUrl/');
+      print('API Status Check: HTTP ${response.statusCode}, Status: ${response.data['status']}');
       return response.statusCode == 200;
     } catch (e) {
       print('Connection test failed: $e');
@@ -34,51 +33,60 @@ class SyncService {
     }
   }
 
-  // Sync semua geotags yang belum tersinkronisasi (Ditingkatkan untuk Upload Foto)
+  // Sync semua geotags yang belum tersinkronisasi (Ditingkatkan untuk Upload Foto & Logging)
   Future<Map<String, dynamic>> syncGeotags() async {
+    DatabaseHelper dbHelper = DatabaseHelper();
+    List<Geotag> unsyncedGeotags = await dbHelper.getUnsyncedGeotags();
+
+    if (unsyncedGeotags.isEmpty) {
+      return {
+        'success': true,
+        'message': 'Tidak ada data untuk disinkronkan',
+        'synced': 0,
+        'failed': 0,
+        'detailedError': null, // Tambahan field
+      };
+    }
+
+    int syncedCount = 0;
+    int failedCount = 0;
+    List<String> errors = [];
+    String? lastDetailedError; // NEW: Field untuk menangkap error detail
+    
+    // LOGGING: Mulai sinkronisasi
+    print('--- START SYNC: Found ${unsyncedGeotags.length} unsynced geotags ---');
+    
     try {
-      DatabaseHelper dbHelper = DatabaseHelper();
-      List<Geotag> unsyncedGeotags = await dbHelper.getUnsyncedGeotags();
-
-      if (unsyncedGeotags.isEmpty) {
-        return {
-          'success': true,
-          'message': 'Tidak ada data untuk disinkronkan',
-          'synced': 0,
-          'failed': 0,
-        };
-      }
-
-      int syncedCount = 0;
-      int failedCount = 0;
-      List<String> errors = [];
-
       // Sync satu per satu
       for (var geotag in unsyncedGeotags) {
+        print('Processing Geotag ID: ${geotag.id}');
+        
         String finalPhotoPath = geotag.photoPath;
         bool localPhotoExists = geotag.photoPath.isNotEmpty && File(geotag.photoPath).existsSync();
         bool isUploadSuccessful = true;
 
-        // 1. UPLOAD FOTO jika ada dan tersimpan lokal
+        // 1. UPLOAD FOTO
         if (localPhotoExists) {
-            // Upload foto ke server dan dapatkan URL publik
-            print('Uploading photo for geotag ${geotag.id}: ${geotag.photoPath}');
-            String? photoUrl = await uploadPhoto(geotag.photoPath);
-
-            if (photoUrl != null) {
-                finalPhotoPath = photoUrl;
-            } else {
+            print('  > Local photo found. Starting upload for: ${geotag.photoPath.split('/').last}');
+            try {
+                String? photoUrl = await uploadPhoto(geotag.photoPath);
+                finalPhotoPath = photoUrl!;
+                print('  > Photo upload SUCCESS. URL: $photoUrl');
+            } catch (e) {
+                // UPLOAD FAILED. Tangkap error dan jadikan error detail untuk UI
                 isUploadSuccessful = false;
                 failedCount++;
-                // Lanjutkan ke geotag berikutnya jika upload gagal
-                errors.add('Geotag ${geotag.id}: Gagal upload foto.');
-                continue; 
+                lastDetailedError = e.toString(); 
+                errors.add('Geotag ${geotag.id}: Gagal upload foto. Detail: ${e.toString()}');
+                print('  > Photo upload FAILED. Skipping geotag data sync for ID: ${geotag.id}. Error: $e');
+                continue; // Lanjutkan ke geotag berikutnya jika upload gagal
             }
+        } else if (geotag.photoPath.isNotEmpty) {
+            print('  > Warning: Photo path exists but local file not found. Syncing geotag data with current photoPath.');
         }
         
-        // 2. SYNC GEOTAG
+        // 2. SYNC GEOTAG DATA
         try {
-            // Buat objek Geotag baru untuk dikirim dan di-update di DB lokal
             Geotag geotagToSync = Geotag(
                 id: geotag.id,
                 projectId: geotag.projectId,
@@ -89,36 +97,37 @@ class SyncService {
                 itemType: geotag.itemType,
                 condition: geotag.condition,
                 details: geotag.details,
-                photoPath: finalPhotoPath, // Menggunakan URL publik/path lama
+                photoPath: finalPhotoPath, 
                 isSynced: true, 
                 deviceId: geotag.deviceId
             );
 
-            // Kirim data ke server
             await _syncSingleGeotag(geotagToSync);
+            print('  > Geotag data sync SUCCESS for ID: ${geotag.id}');
             
             // 3. UPDATE DATABASE LOKAL DAN HAPUS FOTO LOKAL
             if (localPhotoExists && isUploadSuccessful) {
-                // Hapus file lokal setelah berhasil diupload dan disinkronkan
                 await File(geotag.photoPath).delete();
-                print('Local photo deleted: ${geotag.photoPath}');
+                print('  > Local photo deleted: ${geotag.photoPath.split('/').last}');
             }
-            
-            // Perbarui data geotag di DB lokal dengan path URL publik dan status isSynced = true
             await dbHelper.updateGeotag(geotagToSync); 
-            
             syncedCount++;
         } catch (e) {
             failedCount++;
-            errors.add('Geotag ${geotag.id}: Gagal sinkronisasi data: ${e.toString()}');
+            lastDetailedError = e.toString(); // Tangkap error detail
+            errors.add('Geotag ${geotag.id}: Gagal sinkronisasi data. Detail: ${e.toString()}');
+            print('  > Geotag data sync FAILED for ID: ${geotag.id}. Error: $e');
         }
       }
+
+      // LOGGING: Ringkasan Sync
+      print('--- SYNC COMPLETE: Success: $syncedCount, Failed: $failedCount ---');
 
       String message;
       if (failedCount == 0) {
         message = 'Sinkronisasi berhasil: $syncedCount data.';
       } else {
-        message = 'Sinkronisasi selesai. Berhasil: $syncedCount, Gagal: $failedCount. (Cek log untuk detail)';
+        message = 'Sinkronisasi selesai. Berhasil: $syncedCount, Gagal: $failedCount. Cek detail error.';
       }
 
       return {
@@ -127,28 +136,63 @@ class SyncService {
         'synced': syncedCount,
         'failed': failedCount,
         'errors': errors,
+        'detailedError': lastDetailedError, // RETURN NEW FIELD
       };
     } catch (e) {
-      print('Sync failed: $e');
+      print('FATAL Sync FAILED: $e');
       return {
         'success': false,
-        'message': 'Sinkronisasi gagal: ${e.toString()}',
+        'message': 'Sinkronisasi gagal total: ${e.toString()}',
         'synced': 0,
-        'failed': 0,
+        'failed': unsyncedGeotags.length,
+        'detailedError': e.toString(), // RETURN NEW FIELD
       };
     }
   }
 
-  // Fungsi syncGeotagsBulk diubah menjadi placeholder karena sudah tidak sesuai dengan alur upload foto per data.
-  Future<Map<String, dynamic>> syncGeotagsBulk() async {
-    return {
-      'success': false,
-      'message': 'Fungsi bulk sync sudah digantikan oleh syncGeotags.',
-      'synced': 0,
-    };
+  // Upload photo to server (MODIFIED: Throw Exception with detailed server response)
+  Future<String?> uploadPhoto(String filePath) async {
+    var request = http.MultipartRequest(
+      'POST',
+      Uri.parse('$baseUrl/upload'),
+    );
+
+    request.files.add(await http.MultipartFile.fromPath('photo', filePath));
+    
+    try {
+      var streamedResponse = await request.send();
+      var response = await http.Response.fromStream(streamedResponse);
+      
+      print('  > Upload HTTP Status: ${response.statusCode}');
+      
+      String responseBody = response.body;
+      print('  > Upload Response Body: $responseBody'); // Mencetak body mentah
+
+      if (response.statusCode == 200) {
+        try {
+          var jsonResponse = jsonDecode(responseBody);
+          if (jsonResponse['success']) {
+            return jsonResponse['url'];
+          } else {
+            // Failure: HTTP 200 tapi API logic error (mis. pesan error dari PHP di dalam JSON)
+            throw Exception('API Logic Error: ${jsonResponse['message']} (Response: $responseBody)');
+          }
+        } catch (e) {
+          // Failure: Cannot parse JSON (mis. raw PHP/HTML error)
+          throw Exception('Invalid Response Format (Gagal Parse JSON). Raw Server Output: $responseBody');
+        }
+      } else {
+        // Failure: Non-200 HTTP Status
+        throw Exception('HTTP Error ${response.statusCode}. Raw Server Output: $responseBody');
+      }
+    } catch (e) {
+      // Failure: Network atau connection exception
+      print('  > Upload FAILED (Network Exception): $e');
+      rethrow; 
+    }
   }
 
-  // Sync single geotag (helper function)
+  // Sync single geotag (helper function) - menggunakan Dio
   Future<void> _syncSingleGeotag(Geotag geotag) async {
     final response = await _dio.post(
       '$baseUrl/geotags',
@@ -167,117 +211,17 @@ class SyncService {
     );
 
     if (response.statusCode != 200 || !response.data['success']) {
+      print('  > Failed to sync geotag data. Server Response: ${response.data}');
       throw Exception('Failed to sync geotag: ${response.data['message']}');
     }
   }
 
-  // Sync project
-  Future<bool> syncProject(Project project) async {
-    try {
-      final response = await _dio.post(
-        '$baseUrl/projects',
-        data: project.toMap(),
-      );
-
-      return response.statusCode == 200 || response.statusCode == 201;
-    } catch (e) {
-      print('Failed to sync project: $e');
-      return false;
-    }
-  }
-
-  // Upload photo to server
-  Future<String?> uploadPhoto(String filePath) async {
-    try {
-      var request = http.MultipartRequest(
-        'POST',
-        Uri.parse('$baseUrl/upload'),
-      );
-
-      request.files.add(await http.MultipartFile.fromPath('photo', filePath));
-
-      var streamedResponse = await request.send();
-      var response = await http.Response.fromStream(streamedResponse);
-
-      if (response.statusCode == 200) {
-        var jsonResponse = jsonDecode(response.body);
-        if (jsonResponse['success']) {
-          return jsonResponse['url'];
-        }
-      }
-
-      return null;
-    } catch (e) {
-      print('Failed to upload photo: $e');
-      return null;
-    }
-  }
-
-  // Get statistics from server
-  Future<Map<String, dynamic>?> getStatistics() async {
-    try {
-      final response = await _dio.get('$baseUrl/stats');
-      
-      if (response.statusCode == 200 && response.data['success']) {
-        return response.data['data'];
-      }
-      
-      return null;
-    } catch (e) {
-      print('Failed to get statistics: $e');
-      return null;
-    }
-  }
-
-  // Get all projects from server
-  Future<List<Project>?> getProjects() async {
-    try {
-      final response = await _dio.get('$baseUrl/projects');
-      
-      if (response.statusCode == 200 && response.data['success']) {
-        List<dynamic> projectsData = response.data['data'];
-        return projectsData.map((p) => Project.fromMap(p)).toList();
-      }
-      
-      return null;
-    } catch (e) {
-      print('Failed to get projects: $e');
-      return null;
-    }
-  }
-
-  // Get geotags for a project from server
-  Future<List<Geotag>?> getGeotagsByProject(int projectId) async {
-    try {
-      final response = await _dio.get(
-        '$baseUrl/geotags',
-        queryParameters: {'projectId': projectId},
-      );
-      
-      if (response.statusCode == 200 && response.data['success']) {
-        List<dynamic> geotagsData = response.data['data'];
-        return geotagsData.map((g) => Geotag.fromMap(g)).toList();
-      }
-      
-      return null;
-    } catch (e) {
-      print('Failed to get geotags: $e');
-      return null;
-    }
-  }
-
-  // Check if API is reachable
+  // Check if API is reachable (alias dari testConnection)
   Future<bool> checkConnection() async {
-    try {
-      final response = await _dio.get('$baseUrl/');
-      return response.statusCode == 200;
-    } catch (e) {
-      print('Connection check failed: $e');
-      return false;
-    }
+    return testConnection();
   }
 
-  // Get sync statistics
+  // Get sync statistics dari database lokal
   Future<Map<String, int>> getSyncStats() async {
     try {
       DatabaseHelper dbHelper = DatabaseHelper();
@@ -290,7 +234,7 @@ class SyncService {
         'unsynced': unsyncedGeotags.length,
       };
     } catch (e) {
-      print('Failed to get sync stats: $e');
+      print('Failed to get local sync stats: $e');
       return {'total': 0, 'synced': 0, 'unsynced': 0};
     }
   }

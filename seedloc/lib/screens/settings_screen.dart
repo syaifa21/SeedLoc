@@ -1,9 +1,9 @@
 import 'package:flutter/material.dart';
 import '../services/sync_service.dart';
-import '../services/export_service.dart'; // <-- MEMPERBAIKI Error 'ExportService'
+import '../services/export_service.dart'; //
 import '../database/database_helper.dart';
 import '../models/project.dart';
-import 'package:permission_handler/permission_handler.dart'; // <-- MEMPERBAIKI Error 'Permission' dan 'openAppSettings'
+import 'package:permission_handler/permission_handler.dart'; //
 
 class SettingsScreen extends StatefulWidget {
   const SettingsScreen({super.key});
@@ -27,6 +27,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
     _loadSyncStats();
     _checkApiConnection();
   }
+  
+  // ... (existing helper methods: _loadSyncStats, _checkApiConnection)
+
+  // Implementasi _loadSyncStats, _checkApiConnection, _exportData, _stopProject, _confirmStopProject, _buildStatCard
 
   Future<void> _loadSyncStats() async {
     try {
@@ -71,6 +75,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
       _syncStatus = 'Menyinkronkan...';
     });
 
+    Map<String, dynamic> result; // Dideklarasikan di luar try-catch untuk digunakan di bawah
+
     try {
       SyncService syncService = SyncService();
       
@@ -84,23 +90,30 @@ class _SettingsScreenState extends State<SettingsScreen> {
       }
 
       // Sync geotags
-      Map<String, dynamic> result = await syncService.syncGeotags();
+      result = await syncService.syncGeotags();
 
       // Reload stats
       await _loadSyncStats();
 
       setState(() {
+        // Sesuaikan pesan status di layar dengan hasil yang lebih detail
         _syncStatus = result['success'] 
             ? '✓ Sinkronisasi berhasil! (${result['synced']} data)' 
-            : '⚠ ${result['message']} (${result['synced']} berhasil, ${result['failed']} gagal)';
+            : '⚠ ${result['message']} (Berhasil: ${result['synced']}, Gagal: ${result['failed']})';
       });
+
+      // --- LOGIC POP-UP ERROR BARU ---
+      String? detailedError = result['detailedError'] as String?;
+      if (!result['success'] && detailedError != null && mounted) {
+        // Tampilkan dialog error hanya jika gagal dan ada detail error
+        _showDetailedErrorDialog(detailedError);
+      }
+      // --- AKHIR LOGIC POP-UP ERROR BARU ---
 
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text(result['success'] 
-                ? 'Data berhasil disinkronkan! (${result['synced']} data)' 
-                : '${result['message']} (${result['synced']} berhasil, ${result['failed']} gagal)'),
+            content: Text(result['message']),
             backgroundColor: result['success'] ? Colors.green : Colors.orange,
             duration: const Duration(seconds: 4),
           ),
@@ -124,6 +137,52 @@ class _SettingsScreenState extends State<SettingsScreen> {
       });
     }
   }
+
+  // --- NEW HELPER METHOD: Menampilkan dialog error detail ---
+  void _showDetailedErrorDialog(String detailedError) {
+    showDialog(
+      context: context,
+      builder: (BuildContext context) {
+        return AlertDialog(
+          title: const Text('Detail Error Sinkronisasi'),
+          content: SingleChildScrollView(
+            child: ListBody(
+              children: <Widget>[
+                const Text(
+                  'Terjadi kegagalan saat sinkronisasi data/foto. Ini adalah pesan detail dari server/aplikasi:',
+                  style: TextStyle(fontWeight: FontWeight.bold),
+                ),
+                const SizedBox(height: 10),
+                // Gunakan SizedBox yang tinggi untuk memastikan teks menonjol
+                SizedBox(
+                  width: double.maxFinite,
+                  child: SelectableText( // Menggunakan SelectableText agar pesan bisa disalin
+                    detailedError,
+                    style: const TextStyle(fontFamily: 'monospace', color: Colors.red),
+                  ),
+                ),
+                const SizedBox(height: 15),
+                const Text(
+                  'Tips: Jika Anda melihat "Raw Server Output", itu adalah pesan mentah dari server PHP Anda (cek izin folder uploads).',
+                  style: TextStyle(fontSize: 12, fontStyle: FontStyle.italic),
+                ),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(),
+              child: const Text('Tutup'),
+            ),
+          ],
+        );
+      },
+    );
+  }
+  // --- END NEW HELPER METHOD ---
+
+  // ... (Metode _exportData, _stopProject, _confirmStopProject, _buildStatCard)
+  // ... (Metode build yang mengandalkan state di atas)
 
   Future<void> _exportData() async {
     setState(() {

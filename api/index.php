@@ -131,7 +131,7 @@ switch($path) {
                     echo json_encode(['success' => false, 'message' => 'Bulk sync failed due to database error: ' . $e->getMessage()]);
                 }
             } else {
-                // Single sync
+                // Single sync (Dipakai saat upload foto sukses)
                 // Basic validation check
                 if (!isset($data['projectId'], $data['latitude'], $data['longitude'], $data['timestamp'], $data['itemType'], $data['condition'], $data['deviceId'])) {
                     http_response_code(400);
@@ -158,45 +158,76 @@ switch($path) {
         break;
         
     case 'upload':
-        // Handle photo upload
+        // Handle photo upload (VALIDASI TIPE FILE DIHAPUS)
         if ($method === 'POST' && isset($_FILES['photo'])) {
             $uploadDir = 'uploads/';
-            // Ensure permissions are set for the directory
+            
+            // 1. PENANGANAN DIREKTORI & IZIN (CRITICAL)
             if (!file_exists($uploadDir)) {
-                mkdir($uploadDir, 0755, true); // Changed 0777 to 0755 for better security
+                if (!mkdir($uploadDir, 0755, true)) { // Mencoba membuat direktori
+                    http_response_code(500);
+                    echo json_encode(['success' => false, 'message' => 'Upload failed: Could not create upload directory. Check server permissions.']);
+                    break;
+                }
+            } else if (!is_writable($uploadDir)) {
+                // Memeriksa apakah direktori bisa ditulisi (writable)
+                http_response_code(500);
+                echo json_encode(['success' => false, 'message' => 'Upload failed: Upload directory is not writable. Ensure folder permissions are 755 or 775.']);
+                break;
             }
             
-            // Validate file type (basic check)
-            $allowedTypes = ['image/jpeg', 'image/png'];
-            if (!in_array($_FILES['photo']['type'], $allowedTypes)) {
-                 http_response_code(415); // Unsupported Media Type
-                 echo json_encode(['success' => false, 'message' => 'Invalid file type. Only JPEG and PNG allowed.']);
-                 break;
+            $file = $_FILES['photo'];
+            
+            // 2. PENANGANAN UPLOAD ERROR BAWAAN PHP
+            if ($file['error'] !== UPLOAD_ERR_OK) {
+                $errorMessage = 'Upload failed.';
+                switch ($file['error']) {
+                    case UPLOAD_ERR_INI_SIZE:
+                    case UPLOAD_ERR_FORM_SIZE:
+                        $errorMessage = 'Upload failed: File size exceeds the maximum allowed size (check php.ini).';
+                        break;
+                    case UPLOAD_ERR_PARTIAL:
+                        $errorMessage = 'Upload failed: File was only partially uploaded.';
+                        break;
+                    case UPLOAD_ERR_NO_FILE:
+                        $errorMessage = 'Upload failed: No file was sent.';
+                        break;
+                    case UPLOAD_ERR_NO_TMP_DIR:
+                        $errorMessage = 'Upload failed: Missing a temporary folder on the server.';
+                        break;
+                    default:
+                        $errorMessage = 'Unknown upload error.';
+                }
+                http_response_code(400);
+                echo json_encode(['success' => false, 'message' => $errorMessage . ' (Code: ' . $file['error'] . ')']);
+                break;
             }
             
-            $fileExtension = pathinfo($_FILES['photo']['name'], PATHINFO_EXTENSION);
-            $fileName = time() . '_' . uniqid() . '.' . $fileExtension; // Added uniqid for better uniqueness
+            // --- VALIDASI TIPE FILE DIHAPUS DI SINI ---
+            // Baris 3. VALIDASI TIPE FILE (dihapus untuk menerima semua jenis file)
+            
+            // 4. PENAMAAN UNIK DAN PATH
+            $fileExtension = pathinfo($file['name'], PATHINFO_EXTENSION);
+            // Menghasilkan nama file unik berdasarkan waktu dan id unik
+            $fileName = time() . '_' . uniqid() . '.' . $fileExtension;
             $targetPath = $uploadDir . $fileName;
             
-            if (move_uploaded_file($_FILES['photo']['tmp_name'], $targetPath)) {
+            // 5. MEMINDAHKAN FILE UPLOAD
+            if (move_uploaded_file($file['tmp_name'], $targetPath)) {
                 echo json_encode([
                     'success' => true,
-                    'message' => 'Photo uploaded',
+                    'message' => 'Photo uploaded successfully.',
                     'path' => $targetPath,
                     'url' => 'https://seedloc.my.id/api/' . $targetPath
                 ]);
             } else {
-                // Check if file size exceeds limit or other server issues
-                $error = $_FILES['photo']['error'];
-                $message = 'Upload failed (Code: ' . $error . ')';
-                if ($error == UPLOAD_ERR_INI_SIZE) {
-                    $message = 'Upload failed: File size too large for PHP limit.';
-                }
-                echo json_encode(['success' => false, 'message' => $message]);
+                // Penanganan jika move_uploaded_file gagal karena alasan lain
+                http_response_code(500);
+                echo json_encode(['success' => false, 'message' => 'Upload failed: Server could not finalize file move operation.']);
             }
         } else {
             http_response_code(400);
-            echo json_encode(['success' => false, 'message' => 'No photo provided or invalid request method']);
+            echo json_encode(['success' => false, 'message' => 'No photo provided or invalid request method.']);
         }
         break;
         
