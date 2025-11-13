@@ -1,3 +1,5 @@
+// File: lib/services/export_service.dart
+
 import 'dart:io';
 import 'package:csv/csv.dart';
 import 'package:path_provider/path_provider.dart';
@@ -33,11 +35,22 @@ class ExportService {
 
     String csv = const ListToCsvConverter().convert(csvData);
 
-    final Directory externalDir = await getExternalStorageDirectory() ?? await getApplicationDocumentsDirectory();
-    final String exportDirPath = path.join(externalDir.path, 'GeotagExports', 'Project_$projectId');
+    // --- MODIFIKASI UNTUK ROOT FOLDER KUSTOM ---
+
+    // Mengganti logic path_provider untuk menargetkan root penyimpanan bersama (/storage/emulated/0).
+    // '/sdcard/' adalah alias umum untuk root penyimpanan eksternal.
+    // Catatan: Ini membutuhkan izin WRITE_EXTERNAL_STORAGE dan mungkin 
+    // dibatasi pada perangkat Android baru (Scoped Storage).
+    const String externalRootPath = '/storage/emulated/0/'; 
+    
+    // Target path: /sdcard/SeedLoc/Project_X
+    final String exportDirPath = path.join(externalRootPath, 'SeedLoc', 'Project_$projectId');
+
+    // --- AKHIR MODIFIKASI ---
 
     final Directory exportDir = Directory(exportDirPath);
     if (!await exportDir.exists()) {
+      // Pastikan izin WRITE_EXTERNAL_STORAGE sudah diberikan oleh user
       await exportDir.create(recursive: true);
     }
 

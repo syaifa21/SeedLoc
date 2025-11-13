@@ -1,13 +1,28 @@
 <?php
+// Recode of syaifa21/seedloc/SeedLoc-8b0dc11b592d9ddd5102231ff18005b178492a54/api/index.php
+
 require_once 'config.php';
 require_once 'db.php';
 
-$db = new Database();
-$conn = $db->getConnection();
+// Initialize DB connection and gracefully handle connection error by returning JSON.
+try {
+    $db = new Database();
+    $conn = $db->getConnection();
+} catch (Exception $e) {
+    http_response_code(500);
+    echo json_encode([
+        'success' => false,
+        'message' => 'API Configuration Error: Database connection failed.',
+        'details' => $e->getMessage()
+    ]);
+    exit();
+}
 
 // Get request method and path
 $method = $_SERVER['REQUEST_METHOD'];
-$path = isset($_GET['path']) ? $_GET['path'] : '';
+
+// TRIM trailing/leading slash for robust routing: /geotags/ -> geotags
+$path = isset($_GET['path']) ? trim($_GET['path'], '/') : '';
 
 // Route requests
 switch($path) {
@@ -29,9 +44,27 @@ switch($path) {
             $projects = $stmt->fetchAll(PDO::FETCH_ASSOC);
             echo json_encode(['success' => true, 'data' => $projects]);
         } elseif ($method === 'POST') {
-            // Create new project
+            // --- MODIFIKASI: MENGGUNAKAN UPSERT (INSERT OR UPDATE) ---
             $data = json_decode(file_get_contents('php://input'), true);
-            $stmt = $conn->prepare("INSERT INTO projects (projectId, activityName, locationName, officers, status) VALUES (?, ?, ?, ?, ?)");
+            
+            // Basic validation check
+            if (!isset($data['projectId'], $data['activityName'], $data['locationName'], $data['officers'])) {
+                http_response_code(400);
+                echo json_encode(['success' => false, 'message' => 'Invalid project data provided']);
+                break;
+            }
+            
+            // Menggunakan INSERT ... ON DUPLICATE KEY UPDATE (UPSERT)
+            // Ini akan membuat project jika baru, atau mengupdate jika sudah ada.
+            $sql = "INSERT INTO projects (projectId, activityName, locationName, officers, status) 
+                    VALUES (?, ?, ?, ?, ?)
+                    ON DUPLICATE KEY UPDATE
+                        activityName = VALUES(activityName),
+                        locationName = VALUES(locationName),
+                        officers = VALUES(officers),
+                        status = VALUES(status)";
+                        
+            $stmt = $conn->prepare($sql);
             $stmt->execute([
                 $data['projectId'],
                 $data['activityName'],
@@ -39,7 +72,9 @@ switch($path) {
                 $data['officers'],
                 $data['status'] ?? 'Active'
             ]);
-            echo json_encode(['success' => true, 'message' => 'Project created']);
+            
+            // Pesan disesuaikan karena bisa berupa insert atau update/sync
+            echo json_encode(['success' => true, 'message' => 'Project synced']);
         }
         break;
         
@@ -63,35 +98,57 @@ switch($path) {
             if (isset($data['geotags']) && is_array($data['geotags'])) {
                 // Bulk sync
                 $synced = 0;
-                foreach ($data['geotags'] as $geotag) {
+                // Start transaction for bulk performance
+                $conn->beginTransaction();
+                try {
                     $stmt = $conn->prepare("INSERT INTO geotags (projectId, latitude, longitude, locationName, timestamp, itemType, `condition`, details, photoPath, isSynced, deviceId) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?)");
-                    $stmt->execute([
-                        $geotag['projectId'],
-                        $geotag['latitude'],
-                        $geotag['longitude'],
-                        $geotag['locationName'],
-                        $geotag['timestamp'],
-                        $geotag['itemType'],
-                        $geotag['condition'],
-                        $geotag['details'],
-                        $geotag['photoPath'] ?? '',
-                        $geotag['deviceId']
-                    ]);
-                    $synced++;
+                    foreach ($data['geotags'] as $geotag) {
+                        // Minimal data validation for required fields
+                        if (!isset($geotag['projectId'], $geotag['latitude'], $geotag['longitude'], $geotag['timestamp'], $geotag['itemType'], $geotag['condition'], $geotag['deviceId'])) {
+                            // Skip invalid data in bulk
+                            continue;
+                        }
+                        
+                        $stmt->execute([
+                            $geotag['projectId'],
+                            $geotag['latitude'],
+                            $geotag['longitude'],
+                            $geotag['locationName'] ?? '',
+                            $geotag['timestamp'],
+                            $geotag['itemType'],
+                            $geotag['condition'],
+                            $geotag['details'] ?? '',
+                            $geotag['photoPath'] ?? '',
+                            $geotag['deviceId']
+                        ]);
+                        $synced++;
+                    }
+                    $conn->commit();
+                    echo json_encode(['success' => true, 'message' => "$synced geotags synced"]);
+                } catch (Exception $e) {
+                    $conn->rollBack();
+                    http_response_code(500);
+                    echo json_encode(['success' => false, 'message' => 'Bulk sync failed due to database error: ' . $e->getMessage()]);
                 }
-                echo json_encode(['success' => true, 'message' => "$synced geotags synced"]);
             } else {
                 // Single sync
+                // Basic validation check
+                if (!isset($data['projectId'], $data['latitude'], $data['longitude'], $data['timestamp'], $data['itemType'], $data['condition'], $data['deviceId'])) {
+                    http_response_code(400);
+                    echo json_encode(['success' => false, 'message' => 'Invalid geotag data provided']);
+                    break;
+                }
+                
                 $stmt = $conn->prepare("INSERT INTO geotags (projectId, latitude, longitude, locationName, timestamp, itemType, `condition`, details, photoPath, isSynced, deviceId) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?)");
                 $stmt->execute([
                     $data['projectId'],
                     $data['latitude'],
                     $data['longitude'],
-                    $data['locationName'],
+                    $data['locationName'] ?? '',
                     $data['timestamp'],
                     $data['itemType'],
                     $data['condition'],
-                    $data['details'],
+                    $data['details'] ?? '',
                     $data['photoPath'] ?? '',
                     $data['deviceId']
                 ]);
@@ -104,11 +161,21 @@ switch($path) {
         // Handle photo upload
         if ($method === 'POST' && isset($_FILES['photo'])) {
             $uploadDir = 'uploads/';
+            // Ensure permissions are set for the directory
             if (!file_exists($uploadDir)) {
-                mkdir($uploadDir, 0777, true);
+                mkdir($uploadDir, 0755, true); // Changed 0777 to 0755 for better security
             }
             
-            $fileName = time() . '_' . basename($_FILES['photo']['name']);
+            // Validate file type (basic check)
+            $allowedTypes = ['image/jpeg', 'image/png'];
+            if (!in_array($_FILES['photo']['type'], $allowedTypes)) {
+                 http_response_code(415); // Unsupported Media Type
+                 echo json_encode(['success' => false, 'message' => 'Invalid file type. Only JPEG and PNG allowed.']);
+                 break;
+            }
+            
+            $fileExtension = pathinfo($_FILES['photo']['name'], PATHINFO_EXTENSION);
+            $fileName = time() . '_' . uniqid() . '.' . $fileExtension; // Added uniqid for better uniqueness
             $targetPath = $uploadDir . $fileName;
             
             if (move_uploaded_file($_FILES['photo']['tmp_name'], $targetPath)) {
@@ -119,10 +186,17 @@ switch($path) {
                     'url' => 'https://seedloc.my.id/api/' . $targetPath
                 ]);
             } else {
-                echo json_encode(['success' => false, 'message' => 'Upload failed']);
+                // Check if file size exceeds limit or other server issues
+                $error = $_FILES['photo']['error'];
+                $message = 'Upload failed (Code: ' . $error . ')';
+                if ($error == UPLOAD_ERR_INI_SIZE) {
+                    $message = 'Upload failed: File size too large for PHP limit.';
+                }
+                echo json_encode(['success' => false, 'message' => $message]);
             }
         } else {
-            echo json_encode(['success' => false, 'message' => 'No photo provided']);
+            http_response_code(400);
+            echo json_encode(['success' => false, 'message' => 'No photo provided or invalid request method']);
         }
         break;
         

@@ -231,7 +231,7 @@ class _GeotagListScreenState extends State<GeotagListScreen> {
           final result = await Navigator.push(
             context,
             MaterialPageRoute(
-              builder: (_) => const FieldDataScreen(projectId: 2222),
+              builder: (_) => const FieldDataScreen(projectId: 210103),
             ),
           );
           // Reload data when returning from add screen if data was saved
