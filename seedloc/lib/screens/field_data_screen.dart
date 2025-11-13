@@ -309,16 +309,29 @@ class _FieldDataScreenState extends State<FieldDataScreen> {
     // 1. Siapkan teks Watermark
     final String geotagInfo = _buildGeotagWatermarkInfo();
     
-    // 2. Ambil dan Stamp Foto (ImageService harus diupdate untuk stamping)
+    // 2. Ambil dan Stamp Foto dengan EXIF GPS metadata
     String? photoPath = await ImageService.pickImage(
       geotagInfo: geotagInfo, 
-      tempPath: 'unused_path' // Variabel dummy, Path sudah dihandle di ImageService
+      tempPath: 'unused_path', // Variabel dummy, Path sudah dihandle di ImageService
+      latitude: _averagedPosition!.latitude,
+      longitude: _averagedPosition!.longitude,
+      altitude: _averagedPosition!.altitude,
+      accuracy: _averagedPosition!.accuracy,
+      bearing: _averagedPosition!.heading,
     );
     
     if (photoPath != null) {
       setState(() {
         _photoPath = photoPath;
       });
+      
+      // Show success message
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Foto berhasil diambil dengan GPS metadata'),
+          backgroundColor: Colors.green,
+        ),
+      );
     }
   }
   // --- AKHIR FUNGSI WATERMARK DAN PENGAMBILAN FOTO BARU ---

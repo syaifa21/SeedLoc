@@ -3,18 +3,40 @@ import 'package:image_picker/image_picker.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:path/path.dart' as path;
 import 'package:image/image.dart' as img; // Import untuk manipulasi gambar
+import 'geotagging_service.dart';
 
 class ImageService {
   static final ImagePicker _picker = ImagePicker();
 
-  static Future<String?> pickImage({required String geotagInfo, required String tempPath}) async {
+  static Future<String?> pickImage({
+    required String geotagInfo, 
+    required String tempPath,
+    double? latitude,
+    double? longitude,
+    double? altitude,
+    double? accuracy,
+    double? bearing,
+  }) async {
     try {
       final XFile? image = await _picker.pickImage(source: ImageSource.camera);
       if (image != null) {
         final String rawImagePath = image.path;
         
-        // Stamping Foto
+        // Stamping Foto dengan text overlay
         final String stampedImagePath = await _stampImageWithGeotagData(rawImagePath, geotagInfo);
+        
+        // Embed EXIF GPS metadata jika koordinat tersedia
+        if (latitude != null && longitude != null) {
+          await GeotaggingService.embedGpsMetadata(
+            imagePath: stampedImagePath,
+            latitude: latitude,
+            longitude: longitude,
+            altitude: altitude,
+            timestamp: DateTime.now(),
+            accuracy: accuracy,
+            bearing: bearing,
+          );
+        }
         
         // Hapus foto mentah yang diambil kamera (XFile)
         await File(rawImagePath).delete();
