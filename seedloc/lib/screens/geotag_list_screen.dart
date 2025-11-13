@@ -6,6 +6,7 @@ import '../database/database_helper.dart';
 import 'field_data_screen.dart';
 import 'geotag_detail_screen.dart';
 import '../services/location_service.dart';
+import '../models/project.dart'; // <-- IMPORT BARU
 
 class GeotagListScreen extends StatefulWidget {
   const GeotagListScreen({super.key});
@@ -21,17 +22,34 @@ class _GeotagListScreenState extends State<GeotagListScreen> {
   String _currentAccuracy = '--';
   String _currentLocationText = '--';
   Timer? _locationTimer;
+  Project? _activeProject; // <-- STATE BARU UNTUK MENYIMPAN PROJECT AKTIF
 
   @override
   void initState() {
     super.initState();
-    _loadGeotags();
+    // Memastikan project dimuat sebelum memuat geotags
+    _loadActiveProject().then((_) { 
+      _loadGeotags();
+    });
     _startLocationTracking();
+  }
+  
+  // METHOD BARU: Load Active Project ID
+  Future<void> _loadActiveProject() async {
+    DatabaseHelper dbHelper = DatabaseHelper();
+    List<Project> projects = await dbHelper.getProjects();
+    if (mounted) {
+      setState(() {
+        // Asumsi proyek pertama adalah proyek aktif yang sedang dikerjakan
+        _activeProject = projects.isNotEmpty ? projects.first : null;
+      });
+    }
   }
 
   @override
   void dispose() {
     LocationService.stopContinuousTracking();
+    _locationTimer?.cancel();
     super.dispose();
   }
 
@@ -64,7 +82,15 @@ class _GeotagListScreenState extends State<GeotagListScreen> {
 
     try {
       DatabaseHelper dbHelper = DatabaseHelper();
-      _geotags = await dbHelper.getGeotags();
+      
+      if (_activeProject != null) {
+        // MENGAMBIL HANYA GEOTAG DARI PROYEK YANG AKTIF
+        _geotags = await dbHelper.getGeotagsByProject(_activeProject!.projectId);
+      } else {
+        // Fallback: Jika tidak ada proyek aktif, tampilkan pesan kosong
+        _geotags = []; 
+      }
+      
     } catch (e) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('Error memuat data: $e')),
@@ -77,6 +103,7 @@ class _GeotagListScreenState extends State<GeotagListScreen> {
   }
 
   Future<void> _deleteGeotag(int id) async {
+    // ... (Logika delete tetap sama)
     try {
       DatabaseHelper dbHelper = DatabaseHelper();
       await dbHelper.deleteGeotag(id);
@@ -92,6 +119,7 @@ class _GeotagListScreenState extends State<GeotagListScreen> {
   }
 
   void _showDeleteDialog(int id) {
+    // ... (Logika dialog tetap sama)
     showDialog(
       context: context,
       builder: (BuildContext context) {
@@ -119,9 +147,13 @@ class _GeotagListScreenState extends State<GeotagListScreen> {
 
   @override
   Widget build(BuildContext context) {
+    String projectTitle = _activeProject != null 
+        ? 'Data Proyek ID: ${_activeProject!.projectId}' 
+        : (_isLoading ? 'Memuat Data...' : 'Tidak Ada Proyek Aktif');
+
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Daftar Data Geotag'),
+        title: Text(projectTitle), // Judul menggunakan ID Proyek aktif
         actions: [
           IconButton(
             icon: const Icon(Icons.refresh),
@@ -161,11 +193,13 @@ class _GeotagListScreenState extends State<GeotagListScreen> {
       body: _isLoading
           ? const Center(child: CircularProgressIndicator())
           : _geotags.isEmpty
-              ? const Center(
+              ? Center(
                   child: Text(
-                    'Belum ada data geotag\nTekan tombol + untuk menambah data',
+                    _activeProject == null 
+                        ? 'Tidak ada proyek aktif. Silakan mulai proyek baru dari layar Home.'
+                        : 'Belum ada data geotag untuk Project ID ${_activeProject!.projectId}\nTekan tombol + untuk menambah data',
                     textAlign: TextAlign.center,
-                    style: TextStyle(fontSize: 16, color: Colors.grey),
+                    style: const TextStyle(fontSize: 16, color: Colors.grey),
                   ),
                 )
               : ListView.builder(
@@ -176,7 +210,7 @@ class _GeotagListScreenState extends State<GeotagListScreen> {
                       margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
                       child: ListTile(
                         leading: CircleAvatar(
-                          backgroundColor: Colors.green,
+                          backgroundColor: geotag.isSynced ? Colors.green : Colors.orange,
                           child: Text('${index + 1}'),
                         ),
                         title: Text(
@@ -228,10 +262,21 @@ class _GeotagListScreenState extends State<GeotagListScreen> {
                 ),
       floatingActionButton: FloatingActionButton(
         onPressed: () async {
+          // CEK KRITIS: Pastikan Project ID sudah dimuat
+          if (_activeProject == null) {
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(content: Text('Tidak ada Proyek aktif. Gagal menambah data.')),
+              );
+              // Coba muat ulang proyek aktif
+              await _loadActiveProject();
+              return;
+          }
+          
           final result = await Navigator.push(
             context,
             MaterialPageRoute(
-              builder: (_) => const FieldDataScreen(projectId: 210103),
+              // FIX KRITIS: Menggunakan Project ID dari state _activeProject
+              builder: (_) => FieldDataScreen(projectId: _activeProject!.projectId),
             ),
           );
           // Reload data when returning from add screen if data was saved

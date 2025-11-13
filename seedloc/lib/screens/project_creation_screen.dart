@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart'; // Import ini untuk FilteringTextInputFormatter
 import '../models/project.dart';
 import '../database/database_helper.dart';
 import 'field_data_screen.dart';
@@ -13,6 +14,8 @@ class ProjectCreationScreen extends StatefulWidget {
 
 class _ProjectCreationScreenState extends State<ProjectCreationScreen> {
   final _formKey = GlobalKey<FormState>();
+  // NEW: Controller untuk Project ID
+  final TextEditingController _projectIdController = TextEditingController();
   final TextEditingController _activityNameController = TextEditingController();
   final TextEditingController _locationNameController = TextEditingController();
   final TextEditingController _officersController = TextEditingController();
@@ -21,6 +24,8 @@ class _ProjectCreationScreenState extends State<ProjectCreationScreen> {
 
   @override
   void dispose() {
+    // NEW: Dispose controller baru
+    _projectIdController.dispose(); 
     _activityNameController.dispose();
     _locationNameController.dispose();
     _officersController.dispose();
@@ -36,9 +41,21 @@ class _ProjectCreationScreenState extends State<ProjectCreationScreen> {
       _isCreating = true;
     });
 
+    // Validasi dan konversi Project ID
+    final int? projectId = int.tryParse(_projectIdController.text);
+    if (projectId == null) {
+        setState(() { _isCreating = false; });
+        ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Error: Project ID harus berupa angka valid.')),
+        );
+        return;
+    }
+
+
     try {
       Project project = Project(
-        projectId: 210103, // Fixed project ID
+        // MENGGUNAKAN INPUT DARI USER
+        projectId: projectId, 
         activityName: _activityNameController.text,
         locationName: _locationNameController.text,
         officers: _officersController.text.split(',').map((e) => e.trim()).toList(),
@@ -90,6 +107,30 @@ class _ProjectCreationScreenState extends State<ProjectCreationScreen> {
                         style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
                       ),
                       const SizedBox(height: 20),
+
+                      // NEW: Project ID Input Field
+                      TextFormField(
+                        controller: _projectIdController,
+                        decoration: const InputDecoration(
+                          labelText: 'Project ID',
+                          hintText: 'Masukkan ID unik Proyek (misal: 1234)',
+                        ),
+                        keyboardType: TextInputType.number,
+                        inputFormatters: [
+                          FilteringTextInputFormatter.digitsOnly
+                        ],
+                        validator: (value) {
+                            if (value == null || value.isEmpty) {
+                                return 'Harap masukkan Project ID';
+                            }
+                            if (int.tryParse(value) == null) {
+                                return 'Project ID harus berupa angka';
+                            }
+                            return null;
+                        }
+                      ),
+                      
+                      const SizedBox(height: 16),
 
                       // Activity Name
                       TextFormField(

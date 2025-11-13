@@ -1,9 +1,9 @@
 import 'package:flutter/material.dart';
 import '../services/sync_service.dart';
-import '../services/export_service.dart'; //
+import '../services/export_service.dart'; 
 import '../database/database_helper.dart';
-import '../models/project.dart';
-import 'package:permission_handler/permission_handler.dart'; //
+import '../models/project.dart'; // Digunakan untuk Project? _activeProject
+import 'package:permission_handler/permission_handler.dart'; 
 
 class SettingsScreen extends StatefulWidget {
   const SettingsScreen({super.key});
@@ -13,6 +13,9 @@ class SettingsScreen extends StatefulWidget {
 }
 
 class _SettingsScreenState extends State<SettingsScreen> {
+  // NEW STATE VARIABLE
+  Project? _activeProject; 
+
   bool _isSyncing = false;
   bool _isExporting = false;
   bool _isCheckingConnection = false;
@@ -26,19 +29,118 @@ class _SettingsScreenState extends State<SettingsScreen> {
     super.initState();
     _loadSyncStats();
     _checkApiConnection();
+    _loadActiveProject(); // <-- NEW CALL
   }
   
-  // ... (existing helper methods: _loadSyncStats, _checkApiConnection)
+  // NEW METHOD: Load Active Project
+  Future<void> _loadActiveProject() async {
+    DatabaseHelper dbHelper = DatabaseHelper();
+    List<Project> projects = await dbHelper.getProjects();
+    if (mounted) {
+      setState(() {
+        // Asumsi proyek pertama adalah proyek aktif
+        _activeProject = projects.isNotEmpty ? projects.first : null;
+      });
+    }
+  }
 
-  // Implementasi _loadSyncStats, _checkApiConnection, _exportData, _stopProject, _confirmStopProject, _buildStatCard
+  // --- NEW WIDGETS ---
+  // Widget untuk menampilkan informasi proyek
+  Widget _buildProjectInfoCard() {
+    if (_activeProject == null) {
+      return Card(
+        color: Colors.red.shade50,
+        child: const Padding(
+          padding: EdgeInsets.all(16.0),
+          child: Text(
+            'Tidak ada proyek aktif. Harap mulai proyek baru dari Home Screen.',
+            style: TextStyle(color: Colors.red),
+          ),
+        ),
+      );
+    }
+
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(16.0),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                const Icon(Icons.folder_open, color: Colors.green),
+                const SizedBox(width: 8),
+                const Text('Proyek Aktif', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+                const Spacer(),
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                  decoration: BoxDecoration(
+                    color: _activeProject!.status == 'Aktif' ? Colors.green.shade100 : Colors.blue.shade100,
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: Text(
+                    _activeProject!.status,
+                    style: TextStyle(
+                      fontSize: 12,
+                      fontWeight: FontWeight.bold,
+                      color: _activeProject!.status == 'Aktif' ? Colors.green.shade700 : Colors.blue.shade700,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            const Divider(height: 20),
+            _buildInfoRow('Project ID', _activeProject!.projectId.toString()),
+            _buildInfoRow('Kegiatan', _activeProject!.activityName),
+            _buildInfoRow('Lokasi', _activeProject!.locationName),
+            _buildInfoRow('Petugas', _activeProject!.officers.join(', ')),
+          ],
+        ),
+      ),
+    );
+  }
+  
+  // Helper untuk baris informasi
+  Widget _buildInfoRow(String label, String value) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 4.0),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          SizedBox(
+            width: 100,
+            child: Text(
+              '$label:',
+              style: const TextStyle(
+                fontWeight: FontWeight.w500,
+                color: Colors.grey,
+              ),
+            ),
+          ),
+          Expanded(
+            child: Text(
+              value,
+              style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+  // --- END NEW WIDGETS ---
+
+
+  // --- EXISTING METHODS (Disederhanakan) ---
 
   Future<void> _loadSyncStats() async {
     try {
       SyncService syncService = SyncService();
       Map<String, int> stats = await syncService.getSyncStats();
-      setState(() {
-        _syncStats = stats;
-      });
+      if (mounted) {
+        setState(() {
+          _syncStats = stats;
+        });
+      }
     } catch (e) {
       print('Error loading sync stats: $e');
     }
@@ -49,66 +151,70 @@ class _SettingsScreenState extends State<SettingsScreen> {
       _isCheckingConnection = true;
       _connectionStatus = 'Memeriksa koneksi...';
     });
-
+    // ... (rest of _checkApiConnection logic)
     try {
       SyncService syncService = SyncService();
       bool isConnected = await syncService.checkConnection();
-      setState(() {
-        _connectionStatus = isConnected 
-            ? '✓ Terhubung ke API' 
-            : '✗ Tidak dapat terhubung ke API';
-      });
+      if (mounted) {
+        setState(() {
+          _connectionStatus = isConnected 
+              ? '✓ Terhubung ke API' 
+              : '✗ Tidak dapat terhubung ke API';
+        });
+      }
     } catch (e) {
-      setState(() {
-        _connectionStatus = '✗ Error: ${e.toString()}';
-      });
+      if (mounted) {
+        setState(() {
+          _connectionStatus = '✗ Error: ${e.toString()}';
+        });
+      }
     } finally {
-      setState(() {
-        _isCheckingConnection = false;
-      });
+      if (mounted) {
+        setState(() {
+          _isCheckingConnection = false;
+        });
+      }
     }
   }
-
+  
   Future<void> _syncData() async {
-    setState(() {
+     // ... (Sync logic remains the same)
+     setState(() {
       _isSyncing = true;
       _syncStatus = 'Menyinkronkan...';
     });
 
-    Map<String, dynamic> result; // Dideklarasikan di luar try-catch untuk digunakan di bawah
+    Map<String, dynamic> result; 
 
     try {
       SyncService syncService = SyncService();
       
-      // First check connection
       bool isConnected = await syncService.checkConnection();
       if (!isConnected) {
-        setState(() {
-          _syncStatus = '✗ Tidak dapat terhubung ke API. Periksa koneksi internet Anda.';
-        });
+        if (mounted) {
+          setState(() {
+            _syncStatus = '✗ Tidak dapat terhubung ke API. Periksa koneksi internet Anda.';
+          });
+        }
         return;
       }
 
-      // Sync geotags
       result = await syncService.syncGeotags();
 
-      // Reload stats
       await _loadSyncStats();
 
-      setState(() {
-        // Sesuaikan pesan status di layar dengan hasil yang lebih detail
-        _syncStatus = result['success'] 
-            ? '✓ Sinkronisasi berhasil! (${result['synced']} data)' 
-            : '⚠ ${result['message']} (Berhasil: ${result['synced']}, Gagal: ${result['failed']})';
-      });
+      if (mounted) {
+        setState(() {
+          _syncStatus = result['success'] 
+              ? '✓ Sinkronisasi berhasil! (${result['synced']} data)' 
+              : '⚠ ${result['message']} (Berhasil: ${result['synced']}, Gagal: ${result['failed']})';
+        });
+      }
 
-      // --- LOGIC POP-UP ERROR BARU ---
       String? detailedError = result['detailedError'] as String?;
       if (!result['success'] && detailedError != null && mounted) {
-        // Tampilkan dialog error hanya jika gagal dan ada detail error
         _showDetailedErrorDialog(detailedError);
       }
-      // --- AKHIR LOGIC POP-UP ERROR BARU ---
 
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -120,10 +226,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
         );
       }
     } catch (e) {
-      setState(() {
-        _syncStatus = '✗ Error sinkronisasi: $e';
-      });
       if (mounted) {
+        setState(() {
+          _syncStatus = '✗ Error sinkronisasi: $e';
+        });
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text('Error: $e'),
@@ -132,14 +238,17 @@ class _SettingsScreenState extends State<SettingsScreen> {
         );
       }
     } finally {
-      setState(() {
-        _isSyncing = false;
-      });
+      if (mounted) {
+        setState(() {
+          _isSyncing = false;
+        });
+      }
     }
   }
 
-  // --- NEW HELPER METHOD: Menampilkan dialog error detail ---
+
   void _showDetailedErrorDialog(String detailedError) {
+    // ... (Dialog logic remains the same)
     showDialog(
       context: context,
       builder: (BuildContext context) {
@@ -153,10 +262,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   style: TextStyle(fontWeight: FontWeight.bold),
                 ),
                 const SizedBox(height: 10),
-                // Gunakan SizedBox yang tinggi untuk memastikan teks menonjol
                 SizedBox(
                   width: double.maxFinite,
-                  child: SelectableText( // Menggunakan SelectableText agar pesan bisa disalin
+                  child: SelectableText( 
                     detailedError,
                     style: const TextStyle(fontFamily: 'monospace', color: Colors.red),
                   ),
@@ -179,62 +287,65 @@ class _SettingsScreenState extends State<SettingsScreen> {
       },
     );
   }
-  // --- END NEW HELPER METHOD ---
-
-  // ... (Metode _exportData, _stopProject, _confirmStopProject, _buildStatCard)
-  // ... (Metode build yang mengandalkan state di atas)
 
   Future<void> _exportData() async {
+    // ... (Export logic remains the same)
     setState(() {
       _isExporting = true;
       _exportStatus = 'Mengekspor...';
     });
 
     try {
-      // PERMISSION CHECK
       PermissionStatus status = await Permission.storage.request();
       
       if (status.isDenied) {
-        // Jika izin ditolak, batalkan ekspor
-        setState(() {
-          _exportStatus = '✗ Ekspor dibatalkan: Izin penyimpanan ditolak.';
-        });
-        // Arahkan pengguna ke pengaturan jika ditolak permanen
+        if (mounted) {
+          setState(() {
+            _exportStatus = '✗ Ekspor dibatalkan: Izin penyimpanan ditolak.';
+          });
+        }
         if (status.isPermanentlyDenied) {
           openAppSettings();
         }
         return;
       }
-      // END PERMISSION CHECK
 
       DatabaseHelper dbHelper = DatabaseHelper();
       List<Project> projects = await dbHelper.getProjects();
 
       if (projects.isEmpty) {
-        setState(() {
-          _exportStatus = 'Tidak ada proyek untuk diekspor';
-        });
+        if (mounted) {
+          setState(() {
+            _exportStatus = 'Tidak ada proyek untuk diekspor';
+          });
+        }
         return;
       }
 
-      // For simplicity, export the first project. In a real app, you'd let the user choose.
       String exportPath = await ExportService.exportGeotagsToCsv(projects.first.projectId);
 
-      setState(() {
-        _exportStatus = 'Ekspor selesai: $exportPath';
-      });
+      if (mounted) {
+        setState(() {
+          _exportStatus = 'Ekspor selesai: $exportPath';
+        });
+      }
     } catch (e) {
-      setState(() {
-        _exportStatus = 'Error ekspor: $e';
-      });
+      if (mounted) {
+        setState(() {
+          _exportStatus = 'Error ekspor: $e';
+        });
+      }
     } finally {
-      setState(() {
-        _isExporting = false;
-      });
+      if (mounted) {
+        setState(() {
+          _isExporting = false;
+        });
+      }
     }
   }
 
   Future<void> _stopProject() async {
+    // ... (Stop Project logic remains the same)
     showDialog(
       context: context,
       builder: (BuildContext context) {
@@ -261,22 +372,28 @@ class _SettingsScreenState extends State<SettingsScreen> {
   }
 
   Future<void> _confirmStopProject() async {
+    // ... (Confirm Stop Project logic remains the same)
     try {
       DatabaseHelper dbHelper = DatabaseHelper();
       await dbHelper.clearAllData();
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Project dihentikan. Membuat project baru...')),
-      );
-      // Force restart the app to refresh state
-      Navigator.of(context).pushNamedAndRemoveUntil('/home', (Route<dynamic> route) => false);
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Project dihentikan. Membuat project baru...')),
+        );
+        Navigator.of(context).pushNamedAndRemoveUntil('/home', (Route<dynamic> route) => false);
+      }
     } catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Error menghentikan project: $e')),
-      );
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error menghentikan project: $e')),
+        );
+      }
     }
   }
 
+
   Widget _buildStatCard(String label, int value, Color color) {
+    // ... (Stat Card logic remains the same)
     return Column(
       children: [
         Container(
@@ -315,6 +432,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
       body: ListView(
         padding: const EdgeInsets.all(16.0),
         children: [
+          // NEW: Project Information Card
+          _buildProjectInfoCard(),
+          
+          const SizedBox(height: 20),
+          
           // API Connection Status
           Card(
             child: Padding(
@@ -424,30 +546,30 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
           const SizedBox(height: 20),
 
-          // Export Section
-          Card(
-            child: Padding(
-              padding: const EdgeInsets.all(16.0),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  const Text('Ekspor Data', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
-                  const SizedBox(height: 10),
-                  const Text('Ekspor geotag ke CSV dengan foto'),
-                  const SizedBox(height: 10),
-                  ElevatedButton(
-                    onPressed: _isExporting ? null : _exportData,
-                    child: Text(_isExporting ? 'Mengekspor...' : 'Ekspor Data'),
-                  ),
-                  if (_exportStatus.isNotEmpty)
-                    Padding(
-                      padding: const EdgeInsets.only(top: 10),
-                      child: Text(_exportStatus),
-                    ),
-                ],
-              ),
-            ),
-          ),
+          // // Export Section
+          // Card(
+          //   child: Padding(
+          //     padding: const EdgeInsets.all(16.0),
+          //     child: Column(
+          //       crossAxisAlignment: CrossAxisAlignment.start,
+          //       children: [
+          //         const Text('Ekspor Data', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+          //         const SizedBox(height: 10),
+          //         const Text('Ekspor geotag ke CSV dengan foto'),
+          //         const SizedBox(height: 10),
+          //         ElevatedButton(
+          //           onPressed: _isExporting ? null : _exportData,
+          //           child: Text(_isExporting ? 'Mengekspor...' : 'Ekspor Data'),
+          //         ),
+          //         if (_exportStatus.isNotEmpty)
+          //           Padding(
+          //             padding: const EdgeInsets.only(top: 10),
+          //             child: Text(_exportStatus),
+          //           ),
+          //       ],
+          //     ),
+          //   ),
+          // ),
 
           const SizedBox(height: 20),
 
