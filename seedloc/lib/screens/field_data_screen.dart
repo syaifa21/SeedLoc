@@ -23,6 +23,8 @@ class _FieldDataScreenState extends State<FieldDataScreen> {
   final _formKey = GlobalKey<FormState>();
   final TextEditingController _detailsController = TextEditingController();
   final TextEditingController _itemTypeController = TextEditingController();
+  // NEW: Controller untuk input Nama Lokasi Manual
+  final TextEditingController _locationNameInputController = TextEditingController();
 
   String _condition = 'Baik';
   String? _photoPath;
@@ -31,7 +33,9 @@ class _FieldDataScreenState extends State<FieldDataScreen> {
   String _accuracyText = 'Akurasi: -- m';
   String _currentLocationText = 'Lokasi Terkini: --';
   Position? _averagedPosition;
-  String _locationName = 'Koordinat: --';
+  
+  // Diubah untuk menampilkan Akurasi Final
+  String _locationNameStatus = 'Akurasi Final: --'; 
   String _samplesInfo = 'Sampel: 0';
 
   Timer? _timer;
@@ -52,6 +56,7 @@ class _FieldDataScreenState extends State<FieldDataScreen> {
     _uiUpdateTimer?.cancel();
     _detailsController.dispose();
     _itemTypeController.dispose();
+    _locationNameInputController.dispose(); // NEW: Bersihkan controller baru
     super.dispose();
   }
 
@@ -76,7 +81,6 @@ class _FieldDataScreenState extends State<FieldDataScreen> {
   Future<void> _requestPermissions() async {
     await Permission.location.request();
     await Permission.camera.request();
-    // Permintaan izin Storage dihapus di sini karena sudah dihandle di SettingsScreen dan tidak relevan untuk Android 13+
   }
 
   Future<String> _getDeviceId() async {
@@ -92,6 +96,7 @@ class _FieldDataScreenState extends State<FieldDataScreen> {
       _isCapturingLocation = true;
       _progress = 0.0;
       _samplesInfo = 'Sampel: 0';
+      _locationNameStatus = 'Akurasi Final: --';
     });
 
     List<Position> samples = [];
@@ -157,17 +162,14 @@ class _FieldDataScreenState extends State<FieldDataScreen> {
     List<Position> filtered = _removeOutliers(samples);
     Position averaged = _calculateWeightedAverage(filtered);
 
-    // Get location name
-    String locationName = await LocationService.getLocationName(
-      averaged.latitude,
-      averaged.longitude,
-    );
+    // --- PERUBAHAN: Hapus Panggilan ke LocationService.getLocationName ---
 
     setState(() {
       _averagedPosition = averaged;
-      _locationName = 'Koordinat: $locationName';
       _isCapturingLocation = false;
       _progress = 1.0;
+      // Update status dengan akurasi final yang didapat
+      _locationNameStatus = 'Akurasi Final: ${averaged.accuracy.toStringAsFixed(1)} m'; 
     });
 
     // Show success message
@@ -187,31 +189,27 @@ class _FieldDataScreenState extends State<FieldDataScreen> {
   // Remove outliers using Interquartile Range (IQR) method
   List<Position> _removeOutliers(List<Position> positions) {
     if (positions.length < 4) {
-      return positions; // Not enough data for outlier detection
+      return positions; 
     }
 
-    // Calculate median position
     List<double> latitudes = positions.map((p) => p.latitude).toList()..sort();
     List<double> longitudes = positions.map((p) => p.longitude).toList()..sort();
 
     double medianLat = _calculateMedian(latitudes);
     double medianLng = _calculateMedian(longitudes);
 
-    // Calculate distances from median
     List<double> distances = positions.map((p) {
       double latDiff = p.latitude - medianLat;
       double lngDiff = p.longitude - medianLng;
       return sqrt(latDiff * latDiff + lngDiff * lngDiff);
     }).toList();
 
-    // Calculate IQR
     List<double> sortedDistances = List.from(distances)..sort();
     double q1 = _calculateMedian(sortedDistances.sublist(0, sortedDistances.length ~/ 2));
     double q3 = _calculateMedian(sortedDistances.sublist(sortedDistances.length ~/ 2));
     double iqr = q3 - q1;
     double threshold = q3 + 1.5 * iqr;
 
-    // Filter outliers
     List<Position> filtered = [];
     for (int i = 0; i < positions.length; i++) {
       if (distances[i] <= threshold) {
@@ -247,10 +245,7 @@ class _FieldDataScreenState extends State<FieldDataScreen> {
     double weightedLng = 0;
     double totalAccuracy = 0;
 
-    // Calculate weights (inverse of accuracy squared)
     for (var pos in positions) {
-      // Weight = 1 / (accuracy^2)
-      // Better accuracy (smaller value) = higher weight
       double weight = 1.0 / (pos.accuracy * pos.accuracy);
       totalWeight += weight;
       weightedLat += pos.latitude * weight;
@@ -258,16 +253,12 @@ class _FieldDataScreenState extends State<FieldDataScreen> {
       totalAccuracy += pos.accuracy;
     }
 
-    // Calculate weighted average
     double avgLat = weightedLat / totalWeight;
     double avgLng = weightedLng / totalWeight;
     
-    // Calculate improved accuracy estimate
-    // Use the best accuracy from filtered positions
     double bestAccuracy = positions.map((p) => p.accuracy).reduce((a, b) => a < b ? a : b);
     double avgAccuracy = totalAccuracy / positions.length;
     
-    // Final accuracy is weighted between best and average (70% best, 30% average)
     double finalAccuracy = (bestAccuracy * 0.7 + avgAccuracy * 0.3);
 
     return Position(
@@ -284,7 +275,7 @@ class _FieldDataScreenState extends State<FieldDataScreen> {
     );
   }
 
-  // --- FUNGSI BARU UNTUK NAMA FILE (SASARAN UTAMA) ---
+  // FUNGSI BARU UNTUK NAMA FILE
   String _buildPhotoFileName() {
     final DateTime now = DateTime.now();
     // Format YYYYMMDD_HHMMSS
@@ -298,14 +289,14 @@ class _FieldDataScreenState extends State<FieldDataScreen> {
     // Format Final: NamaPohon_Kondisi_YYYYMMDD_HHMMSS
     return '${safeItemType}_${safeCondition}_$formattedDateTime'; 
   }
-  // --- AKHIR FUNGSI NAMA FILE BARU ---
 
-  // FUNGSI WATERMARK ASLI
+  // FUNGSI WATERMARK DENGAN INPUT LOKASI MANUAL
   String _buildGeotagWatermarkInfo() {
     final DateTime now = DateTime.now();
     final String formattedDate = '${now.day}/${now.month}/${now.year} ${now.hour}:${now.minute.toString().padLeft(2, '0')}:${now.second.toString().padLeft(2, '0')}';
     
-    return 'Koordinat: ${_averagedPosition!.latitude.toStringAsFixed(6)}, ${_averagedPosition!.longitude.toStringAsFixed(6)}\n'
+    return 'Lokasi: ${_locationNameInputController.text}\n' // MENGGUNAKAN INPUT MANUAL
+           'Koordinat: ${_averagedPosition!.latitude.toStringAsFixed(6)}, ${_averagedPosition!.longitude.toStringAsFixed(6)}\n'
            'Akurasi: ${_averagedPosition!.accuracy.toStringAsFixed(1)} m\n'
            'Waktu: $formattedDate\n'
            'Tipe Item: ${_itemTypeController.text}\n'
@@ -327,11 +318,11 @@ class _FieldDataScreenState extends State<FieldDataScreen> {
     // 2. Siapkan NAMA FILE BARU
     final String customFileName = _buildPhotoFileName();
     
-    // 3. Ambil dan Stamp Foto (ImageService diupdate untuk menerima nama file)
+    // 3. Ambil dan Stamp Foto
     String? photoPath = await ImageService.pickImage(
       geotagInfo: geotagInfo, 
-      customFileName: customFileName, // Meneruskan nama file baru
-      tempPath: 'unused_path' // Variabel dummy, Path sudah dihandle di ImageService
+      customFileName: customFileName, 
+      tempPath: 'unused_path' 
     );
     
     if (photoPath != null) {
@@ -342,6 +333,7 @@ class _FieldDataScreenState extends State<FieldDataScreen> {
   }
 
   Future<void> _saveGeotag() async {
+    // Tambahkan validasi untuk controller lokasi manual
     if (!_formKey.currentState!.validate() || _averagedPosition == null) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Harap lengkapi semua kolom dan tangkap lokasi')),
@@ -363,12 +355,13 @@ class _FieldDataScreenState extends State<FieldDataScreen> {
       projectId: widget.projectId,
       latitude: _averagedPosition!.latitude,
       longitude: _averagedPosition!.longitude,
-      locationName: _locationName.replaceFirst('Koordinat: ', ''),
+      // MENGGUNAKAN INPUT MANUAL
+      locationName: _locationNameInputController.text, 
       timestamp: DateTime.now().toIso8601String(),
       itemType: _itemTypeController.text,
       condition: _condition,
       details: _detailsController.text,
-      photoPath: _photoPath ?? '', // Menyimpan path foto yang sudah di-stamp
+      photoPath: _photoPath ?? '', 
       deviceId: deviceId,
     );
 
@@ -381,7 +374,7 @@ class _FieldDataScreenState extends State<FieldDataScreen> {
 
     // Navigate back to GeotagListScreen and refresh data
     if (mounted) {
-      Navigator.of(context).pop(true); // Return true to indicate data was saved
+      Navigator.of(context).pop(true); 
     }
   }
 
@@ -389,19 +382,18 @@ class _FieldDataScreenState extends State<FieldDataScreen> {
     setState(() {
       _averagedPosition = null;
       _photoPath = null;
-      _locationName = 'Koordinat: --';
+      _locationNameStatus = 'Akurasi Final: --'; // Reset status
       _accuracyText = 'Akurasi: -- m';
       _currentLocationText = 'Lokasi Terkini: --';
       _progress = 0.0;
     });
     _detailsController.clear();
     _itemTypeController.clear();
+    _locationNameInputController.clear(); // NEW: Bersihkan input manual
   }
 
   @override
   Widget build(BuildContext context) {
-    // ... (Sisa kode build)
-    // Tampilan widget tetap sama
     return Scaffold(
       appBar: AppBar(
         title: const Text('Pengumpulan Data Lapangan'),
@@ -475,8 +467,9 @@ class _FieldDataScreenState extends State<FieldDataScreen> {
                             Text(_accuracyText, style: const TextStyle(fontSize: 12)),
                             Text(_currentLocationText, style: const TextStyle(fontSize: 12)),
                             Text(_samplesInfo, style: const TextStyle(fontSize: 12)),
-                            if (_locationName != 'Koordinat: --')
-                              Text(_locationName, style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
+                            // Menampilkan status akurasi final setelah penangkapan
+                            if (_averagedPosition != null)
+                              Text(_locationNameStatus, style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Colors.green)),
                           ],
                         ),
                       ),
@@ -508,6 +501,15 @@ class _FieldDataScreenState extends State<FieldDataScreen> {
                   child: Column(
                     children: [
                       const Text('Input Data', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+                      const SizedBox(height: 10),
+                      
+                      // NEW: Location Name Input Field
+                      TextFormField(
+                        controller: _locationNameInputController,
+                        decoration: const InputDecoration(labelText: 'Nama Lokasi (Wajib Diisi)'),
+                        validator: (value) =>
+                            value!.isEmpty ? 'Harap masukkan nama lokasi' : null,
+                      ),
                       const SizedBox(height: 10),
 
                       // Item Type Text Field (changed from dropdown)
