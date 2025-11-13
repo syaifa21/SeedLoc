@@ -1,8 +1,9 @@
 import 'package:flutter/material.dart';
 import '../services/sync_service.dart';
-import '../services/export_service.dart';
+import '../services/export_service.dart'; // <-- MEMPERBAIKI Error 'ExportService'
 import '../database/database_helper.dart';
 import '../models/project.dart';
+import 'package:permission_handler/permission_handler.dart'; // <-- MEMPERBAIKI Error 'Permission' dan 'openAppSettings'
 
 class SettingsScreen extends StatefulWidget {
   const SettingsScreen({super.key});
@@ -131,6 +132,22 @@ class _SettingsScreenState extends State<SettingsScreen> {
     });
 
     try {
+      // PERMISSION CHECK
+      PermissionStatus status = await Permission.storage.request();
+      
+      if (status.isDenied) {
+        // Jika izin ditolak, batalkan ekspor
+        setState(() {
+          _exportStatus = '✗ Ekspor dibatalkan: Izin penyimpanan ditolak.';
+        });
+        // Arahkan pengguna ke pengaturan jika ditolak permanen
+        if (status.isPermanentlyDenied) {
+          openAppSettings();
+        }
+        return;
+      }
+      // END PERMISSION CHECK
+
       DatabaseHelper dbHelper = DatabaseHelper();
       List<Project> projects = await dbHelper.getProjects();
 
@@ -265,7 +282,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     ),
                   ),
                   const SizedBox(height: 5),
-                  const Text('Pastikan saat Sinkronisasi , Status API Terhubung', style: TextStyle(fontSize: 12, color: Colors.grey)),
+                  const Text('API: https://seedloc.my.id/api', style: TextStyle(fontSize: 12, color: Colors.grey)),
                 ],
               ),
             ),
@@ -424,12 +441,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   const Text('SeedLoc v1.0.0'),
                   const Text('Aplikasi Pengumpulan Data Lapangan Geotagging'),
                   const SizedBox(height: 10),
-                  const Text('Pemenuhan Aktualisasi Latsar CPNS Kemenhut 2025'),
+                  const Text('Latsar CPNS Kemenhut 2025'),
                   const SizedBox(height: 10),
-                  const Text('Mode: Offline (Database lokal SQLite)'),
-                  const Text('Sinkronisasi: Siap untuk backend'),
-                  const SizedBox(height: 10),
-                  const Text('Pengembang: Ali SYaifarudin'),
+                  const Text('Pengembang: Ali Syaifarudin'),
                   const Text('Kontak: alisyaifarudin04@gmail.com'),
                 ],
               ),

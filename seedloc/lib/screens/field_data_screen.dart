@@ -76,7 +76,7 @@ class _FieldDataScreenState extends State<FieldDataScreen> {
   Future<void> _requestPermissions() async {
     await Permission.location.request();
     await Permission.camera.request();
-    await Permission.storage.request();
+    // Permintaan izin Storage dihapus di sini karena sudah dihandle di SettingsScreen dan tidak relevan untuk Android 13+
   }
 
   Future<String> _getDeviceId() async {
@@ -284,14 +284,45 @@ class _FieldDataScreenState extends State<FieldDataScreen> {
     );
   }
 
+  // --- FUNGSI WATERMARK DAN PENGAMBILAN FOTO BARU ---
+  String _buildGeotagWatermarkInfo() {
+    final DateTime now = DateTime.now();
+    final String formattedDate = '${now.day}/${now.month}/${now.year} ${now.hour}:${now.minute.toString().padLeft(2, '0')}:${now.second.toString().padLeft(2, '0')}';
+    
+    return 'Koordinat: ${_averagedPosition!.latitude.toStringAsFixed(6)}, ${_averagedPosition!.longitude.toStringAsFixed(6)}\n'
+           'Akurasi: ${_averagedPosition!.accuracy.toStringAsFixed(1)} m\n'
+           'Waktu: $formattedDate\n'
+           'Tipe Item: ${_itemTypeController.text}\n'
+           'Kondisi: $_condition\n'
+           'Detail: ${_detailsController.text}'; 
+  }
+
   Future<void> _takePhoto() async {
-    String? photoPath = await ImageService.pickImage();
+    // Pastikan lokasi sudah diambil sebelum mengambil foto
+    if (_averagedPosition == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Harap tangkap lokasi terlebih dahulu')),
+      );
+      return;
+    }
+    
+    // 1. Siapkan teks Watermark
+    final String geotagInfo = _buildGeotagWatermarkInfo();
+    
+    // 2. Ambil dan Stamp Foto (ImageService harus diupdate untuk stamping)
+    String? photoPath = await ImageService.pickImage(
+      geotagInfo: geotagInfo, 
+      tempPath: 'unused_path' // Variabel dummy, Path sudah dihandle di ImageService
+    );
+    
     if (photoPath != null) {
       setState(() {
         _photoPath = photoPath;
       });
     }
   }
+  // --- AKHIR FUNGSI WATERMARK DAN PENGAMBILAN FOTO BARU ---
+
 
   Future<void> _saveGeotag() async {
     if (!_formKey.currentState!.validate() || _averagedPosition == null) {
@@ -320,7 +351,7 @@ class _FieldDataScreenState extends State<FieldDataScreen> {
       itemType: _itemTypeController.text,
       condition: _condition,
       details: _detailsController.text,
-      photoPath: _photoPath ?? '',
+      photoPath: _photoPath ?? '', // Menyimpan path foto yang sudah di-stamp
       deviceId: deviceId,
     );
 

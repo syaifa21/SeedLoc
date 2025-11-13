@@ -96,6 +96,17 @@ class DatabaseHelper {
     return await db.insert('geotags', geotag.toMap());
   }
 
+  Future<int> updateGeotag(Geotag geotag) async {
+    if (geotag.id == null) return 0; // Pastikan ada ID untuk update
+    Database db = await database;
+    return await db.update(
+      'geotags',
+      geotag.toMap(),
+      where: 'id = ?',
+      whereArgs: [geotag.id],
+    );
+  }
+
   Future<List<Geotag>> getGeotagsByProject(int projectId) async {
     Database db = await database;
     final List<Map<String, dynamic>> maps = await db.query(

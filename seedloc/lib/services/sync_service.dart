@@ -34,7 +34,7 @@ class SyncService {
     }
   }
 
-  // Sync semua geotags yang belum tersinkronisasi
+  // Sync semua geotags yang belum tersinkronisasi (Ditingkatkan untuk Upload Foto)
   Future<Map<String, dynamic>> syncGeotags() async {
     try {
       DatabaseHelper dbHelper = DatabaseHelper();
@@ -55,20 +55,75 @@ class SyncService {
 
       // Sync satu per satu
       for (var geotag in unsyncedGeotags) {
-        try {
-          await _syncSingleGeotag(geotag);
-          await dbHelper.updateGeotagSyncStatus(geotag.id!, true);
-          syncedCount++;
-        } catch (e) {
-          failedCount++;
-          errors.add('Geotag ${geotag.id}: ${e.toString()}');
-          print('Failed to sync geotag ${geotag.id}: $e');
+        String finalPhotoPath = geotag.photoPath;
+        bool localPhotoExists = geotag.photoPath.isNotEmpty && File(geotag.photoPath).existsSync();
+        bool isUploadSuccessful = true;
+
+        // 1. UPLOAD FOTO jika ada dan tersimpan lokal
+        if (localPhotoExists) {
+            // Upload foto ke server dan dapatkan URL publik
+            print('Uploading photo for geotag ${geotag.id}: ${geotag.photoPath}');
+            String? photoUrl = await uploadPhoto(geotag.photoPath);
+
+            if (photoUrl != null) {
+                finalPhotoPath = photoUrl;
+            } else {
+                isUploadSuccessful = false;
+                failedCount++;
+                // Lanjutkan ke geotag berikutnya jika upload gagal
+                errors.add('Geotag ${geotag.id}: Gagal upload foto.');
+                continue; 
+            }
         }
+        
+        // 2. SYNC GEOTAG
+        try {
+            // Buat objek Geotag baru untuk dikirim dan di-update di DB lokal
+            Geotag geotagToSync = Geotag(
+                id: geotag.id,
+                projectId: geotag.projectId,
+                latitude: geotag.latitude,
+                longitude: geotag.longitude,
+                locationName: geotag.locationName,
+                timestamp: geotag.timestamp,
+                itemType: geotag.itemType,
+                condition: geotag.condition,
+                details: geotag.details,
+                photoPath: finalPhotoPath, // Menggunakan URL publik/path lama
+                isSynced: true, 
+                deviceId: geotag.deviceId
+            );
+
+            // Kirim data ke server
+            await _syncSingleGeotag(geotagToSync);
+            
+            // 3. UPDATE DATABASE LOKAL DAN HAPUS FOTO LOKAL
+            if (localPhotoExists && isUploadSuccessful) {
+                // Hapus file lokal setelah berhasil diupload dan disinkronkan
+                await File(geotag.photoPath).delete();
+                print('Local photo deleted: ${geotag.photoPath}');
+            }
+            
+            // Perbarui data geotag di DB lokal dengan path URL publik dan status isSynced = true
+            await dbHelper.updateGeotag(geotagToSync); 
+            
+            syncedCount++;
+        } catch (e) {
+            failedCount++;
+            errors.add('Geotag ${geotag.id}: Gagal sinkronisasi data: ${e.toString()}');
+        }
+      }
+
+      String message;
+      if (failedCount == 0) {
+        message = 'Sinkronisasi berhasil: $syncedCount data.';
+      } else {
+        message = 'Sinkronisasi selesai. Berhasil: $syncedCount, Gagal: $failedCount. (Cek log untuk detail)';
       }
 
       return {
         'success': failedCount == 0,
-        'message': 'Sinkronisasi selesai',
+        'message': message,
         'synced': syncedCount,
         'failed': failedCount,
         'errors': errors,
@@ -84,64 +139,16 @@ class SyncService {
     }
   }
 
-  // Sync bulk (lebih efisien untuk banyak data)
+  // Fungsi syncGeotagsBulk diubah menjadi placeholder karena sudah tidak sesuai dengan alur upload foto per data.
   Future<Map<String, dynamic>> syncGeotagsBulk() async {
-    try {
-      DatabaseHelper dbHelper = DatabaseHelper();
-      List<Geotag> unsyncedGeotags = await dbHelper.getUnsyncedGeotags();
-
-      if (unsyncedGeotags.isEmpty) {
-        return {
-          'success': true,
-          'message': 'Tidak ada data untuk disinkronkan',
-          'synced': 0,
-        };
-      }
-
-      // Prepare data for bulk sync
-      List<Map<String, dynamic>> geotagsData = unsyncedGeotags.map((g) => {
-        'projectId': g.projectId,
-        'latitude': g.latitude,
-        'longitude': g.longitude,
-        'locationName': g.locationName,
-        'timestamp': g.timestamp,
-        'itemType': g.itemType,
-        'condition': g.condition,
-        'details': g.details,
-        'photoPath': g.photoPath,
-        'deviceId': g.deviceId,
-      }).toList();
-
-      final response = await _dio.post(
-        '$baseUrl/geotags',
-        data: {'geotags': geotagsData},
-      );
-
-      if (response.statusCode == 200 && response.data['success']) {
-        // Mark all as synced
-        for (var geotag in unsyncedGeotags) {
-          await dbHelper.updateGeotagSyncStatus(geotag.id!, true);
-        }
-
-        return {
-          'success': true,
-          'message': response.data['message'],
-          'synced': unsyncedGeotags.length,
-        };
-      } else {
-        throw Exception('Bulk sync failed: ${response.data['message']}');
-      }
-    } catch (e) {
-      print('Bulk sync failed: $e');
-      return {
-        'success': false,
-        'message': 'Sinkronisasi bulk gagal: ${e.toString()}',
-        'synced': 0,
-      };
-    }
+    return {
+      'success': false,
+      'message': 'Fungsi bulk sync sudah digantikan oleh syncGeotags.',
+      'synced': 0,
+    };
   }
 
-  // Sync single geotag
+  // Sync single geotag (helper function)
   Future<void> _syncSingleGeotag(Geotag geotag) async {
     final response = await _dio.post(
       '$baseUrl/geotags',

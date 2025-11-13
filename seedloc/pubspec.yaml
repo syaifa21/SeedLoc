@@ -71,6 +71,9 @@ dependencies:
   flutter_map: ^7.0.2
   latlong2: ^0.9.1
   cached_network_image: ^3.4.1
+  archive: ^3.6.1       # Untuk membuat file ZIP
+  image: ^4.2.0          # Untuk memproses dan memberi watermark pada gambar
+  share_plus: ^12.0.1     # Untuk fungsi berbagi (Share to WhatsApp/Lainnya)
 
 dev_dependencies:
   flutter_test:
