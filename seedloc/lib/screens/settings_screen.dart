@@ -438,7 +438,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 children: [
                   const Text('Informasi Aplikasi', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
                   const SizedBox(height: 10),
-                  const Text('SeedLoc v1.0.0'),
+                  const Text('SeedLoc v1.0.1'),
                   const Text('Aplikasi Pengumpulan Data Lapangan Geotagging'),
                   const SizedBox(height: 10),
                   const Text('Latsar CPNS Kemenhut 2025'),
