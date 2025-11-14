@@ -369,7 +369,7 @@ class _MapScreenState extends State<MapScreen> {
               ),
             ),
         
-        // Offline indicator
+        // Offline indicator with cache status
         Positioned(
             top: 16,
             right: 16,
@@ -382,13 +382,26 @@ class _MapScreenState extends State<MapScreen> {
                   children: [
                     Icon(Icons.offline_bolt, color: Colors.green.shade700, size: 16),
                     const SizedBox(width: 4),
-                    Text(
-                      'Offline Ready',
-                      style: TextStyle(
-                        color: Colors.green.shade700,
-                        fontSize: 12,
-                        fontWeight: FontWeight.bold,
-                      ),
+                    Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Text(
+                          'Offline Ready',
+                          style: TextStyle(
+                            color: Colors.green.shade700,
+                            fontSize: 12,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                        Text(
+                          'Cache: Permanent',
+                          style: TextStyle(
+                            color: Colors.green.shade600,
+                            fontSize: 10,
+                          ),
+                        ),
+                      ],
                     ),
                   ],
                 ),

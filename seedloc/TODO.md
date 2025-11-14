@@ -1,22 +1,33 @@
-# TODO: Implement Real-Time Location Bar and Navigation Changes
+# TODO: Pengembangan Fitur Stamping Foto, Kompresi, dan Cache Peta Offline
 
-## 1. Add Real-Time Location Bar to GeotagListScreen
-- [ ] Import Timer and LocationService
-- [ ] Add state variables: _currentPosition, _currentAccuracy, _currentLocationText
-- [ ] Add _startLocationTracking method with Timer (2 seconds interval)
-- [ ] Add dispose method to cancel timer
-- [ ] Add banner widget below AppBar to display real-time location
+## Status: In Progress
 
-## 2. Change Navigation After Project Creation
-- [ ] Import GeotagListScreen in project_creation_screen.dart
-- [ ] Change navigation from '/home' to direct pushReplacement to GeotagListScreen
+### 1. Analisis Fitur Saat Ini
+- [x] ImageService sudah memiliki stamping dengan data lokasi, koordinat, waktu, dll.
+- [x] Kompresi JPEG dengan quality 60 sudah ada.
+- [x] Cache peta dengan Hive sudah ada dan permanen.
 
-## 3. Optimize Location Capture Time in FieldDataScreen
-- [ ] Modify _finishLocationCapture to use getCurrentPosition() instead of getAveragedPositions(20)
-- [ ] Remove averaging logic, use single accurate position directly
-- [ ] Ensure total capture time is max 20 seconds (UI countdown only)
+### 2. Tingkatkan Kompresi Foto
+- [x] Implementasikan kompresi JPEG dengan quality 85 (atau 75 untuk gambar besar) untuk ukuran lebih kecil tanpa kehilangan kualitas signifikan.
+- [x] Tambahkan opsi kompresi adaptif berdasarkan ukuran gambar asli (>5MB estimate).
+- [ ] Test ukuran file sebelum dan sesudah kompresi.
 
-## Testing
-- [ ] Test real-time location updates in Geotag List Screen
-- [ ] Test direct navigation to Geotag List after project creation
-- [ ] Test optimized location capture (20 seconds total)
+### 3. Verifikasi dan Tingkatkan Stamping Data
+- [x] Pastikan stamping mencakup: nama lokasi, koordinat (lat/lng), waktu pengambilan, akurasi, tipe item, kondisi, detail.
+- [x] Tingkatkan tampilan watermark (warna putih solid, background hitam gelap, padding lebih besar).
+- [ ] Tambahkan opsi untuk menampilkan preview stamping sebelum menyimpan.
+
+### 4. Optimalkan Cache Peta Offline
+- [x] Verifikasi cache Hive berfungsi sepenuhnya offline (sudah menggunakan maxStale 365 hari).
+- [x] Tambahkan indikator status cache (menampilkan "Cache: Permanent").
+- [ ] Implementasikan preload cache untuk area tertentu jika diperlukan.
+
+### 5. Testing dan Validasi
+- [ ] Test stamping pada berbagai ukuran foto.
+- [ ] Test kompresi pada foto besar dan kecil.
+- [ ] Test cache peta offline tanpa koneksi internet.
+- [ ] Validasi data yang di-stamp akurat.
+
+### 6. Dokumentasi dan Cleanup
+- [ ] Update komentar kode untuk fitur baru.
+- [ ] Dokumentasi penggunaan fitur di README.

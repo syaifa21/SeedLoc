@@ -46,50 +46,50 @@ class ImageService {
   }
   
   static Future<String> _stampImageWithGeotagData(
-    img.Image originalImage, 
+    img.Image originalImage,
     String geotagInfo,
-    String customFileName, // NEW: Nama file yang digunakan
+    String customFileName, // Nama file yang digunakan
   ) async {
-    // Menggunakan font yang paling dasar
+    // Menggunakan font yang lebih besar dan jelas
     final img.BitmapFont font = img.arial14;
-    
-    // Menggunakan img.ColorRgba8 untuk warna
-    final img.Color fontColor = img.ColorRgba8(255, 255, 0, 150); // Kuning
-    final img.Color backgroundColor = img.ColorRgba8(0, 0, 0, 128); // Hitam transparan
-    
+
+    // Warna yang lebih kontras: Putih dengan background hitam semi-transparan
+    final img.Color fontColor = img.ColorRgba8(255, 255, 255, 255); // Putih solid
+    final img.Color backgroundColor = img.ColorRgba8(0, 0, 0, 180); // Hitam lebih gelap
+
     final List<String> lines = geotagInfo.split('\n');
-    final int lineHeight = font.lineHeight + 4; 
-    final int textHeight = lines.length * lineHeight + 8;
+    final int lineHeight = font.lineHeight + 6; // Spacing lebih besar
+    final int textHeight = lines.length * lineHeight + 16; // Padding lebih besar
 
     // Tentukan area untuk overlay text (di bagian bawah)
     final int startY = originalImage.height - textHeight;
 
-    // Koreksi fillRect: Menggunakan named arguments
+    // Background rectangle untuk text
     img.fillRect(
-      originalImage, 
-      x1: 0, 
-      y1: startY, 
-      x2: originalImage.width, 
-      y2: originalImage.height, 
-      color: backgroundColor 
+      originalImage,
+      x1: 0,
+      y1: startY,
+      x2: originalImage.width,
+      y2: originalImage.height,
+      color: backgroundColor
     );
 
-    int currentY = startY + 8; // Padding atas
-    
+    int currentY = startY + 12; // Padding atas lebih besar
+
     for (String line in lines) {
-      // Menambahkan string watermark
+      // Draw text dengan warna putih solid
       img.drawString(
-        originalImage, 
+        originalImage,
         line,
         font: font,
-        x: 10,
+        x: 12, // Padding kiri lebih besar
         y: currentY,
         color: fontColor,
       );
 
-      currentY += lineHeight; // Pindah ke baris berikutnya
+      currentY += lineHeight;
     }
-    
+
     // Tentukan direktori penyimpanan final
     final Directory appDir = await getApplicationDocumentsDirectory();
     final String imagesDirPath = path.join(appDir.path, 'images');
@@ -98,14 +98,17 @@ class ImageService {
     if (!await imagesDir.exists()) {
       await imagesDir.create(recursive: true);
     }
-    
-    // --- MENGGUNAKAN NAMA FILE CUSTOM DARI PARAMETER ---
-    // Pastikan nama file menggunakan format yang diminta dan tambahkan ekstensi .jpg
-    final String fileName = '$customFileName.jpg'; 
+
+    // Menggunakan nama file custom
+    final String fileName = '$customFileName.jpg';
     final String filePath = path.join(imagesDirPath, fileName);
-    
-    // Simpan dalam format JPEG (menjamin kompatibilitas dengan API)
-    await File(filePath).writeAsBytes(img.encodeJpg(originalImage, quality: 90));
+
+    // KOMPRESI BERKUALITAS TINGGI: Quality 85 untuk balance ukuran dan kualitas
+    // Jika gambar sangat besar (>5MB), gunakan quality 75
+    final int originalSizeEstimate = originalImage.width * originalImage.height * 3; // RGB estimate
+    final int quality = originalSizeEstimate > 5000000 ? 75 : 85; // Adaptive quality
+
+    await File(filePath).writeAsBytes(img.encodeJpg(originalImage, quality: quality));
 
     return filePath;
   }
