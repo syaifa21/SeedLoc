@@ -22,9 +22,12 @@ class FieldDataScreen extends StatefulWidget {
 class _FieldDataScreenState extends State<FieldDataScreen> {
   final _formKey = GlobalKey<FormState>();
   final TextEditingController _detailsController = TextEditingController();
-  final TextEditingController _itemTypeController = TextEditingController();
-  // NEW: Controller untuk input Nama Lokasi Manual
+  // DIHAPUS: final TextEditingController _itemTypeController = TextEditingController(); 
   final TextEditingController _locationNameInputController = TextEditingController();
+
+  // BARU: State dan List untuk Dropdown Jenis Pohon
+  String _itemType = 'Saninten (Castanopsis argentea)'; 
+  final List<String> _treeTypes = ['Saninten (Castanopsis argentea)', 'Puspa (Schima wallichii)', 'Manglid (Manglietia glauca )']; 
 
   String _condition = 'Baik';
   String? _photoPath;
@@ -34,7 +37,6 @@ class _FieldDataScreenState extends State<FieldDataScreen> {
   String _currentLocationText = 'Lokasi Terkini: --';
   Position? _averagedPosition;
   
-  // Diubah untuk menampilkan Akurasi Final
   String _locationNameStatus = 'Akurasi Final: --'; 
   String _samplesInfo = 'Sampel: 0';
 
@@ -55,8 +57,8 @@ class _FieldDataScreenState extends State<FieldDataScreen> {
     _timer?.cancel();
     _uiUpdateTimer?.cancel();
     _detailsController.dispose();
-    _itemTypeController.dispose();
-    _locationNameInputController.dispose(); // NEW: Bersihkan controller baru
+    // DIHAPUS: _itemTypeController.dispose(); 
+    _locationNameInputController.dispose(); 
     super.dispose();
   }
 
@@ -161,8 +163,6 @@ class _FieldDataScreenState extends State<FieldDataScreen> {
     // Remove outliers dan hitung weighted average
     List<Position> filtered = _removeOutliers(samples);
     Position averaged = _calculateWeightedAverage(filtered);
-
-    // --- PERUBAHAN: Hapus Panggilan ke LocationService.getLocationName ---
 
     setState(() {
       _averagedPosition = averaged;
@@ -275,6 +275,20 @@ class _FieldDataScreenState extends State<FieldDataScreen> {
     );
   }
 
+  // FUNGSI WATERMARK DENGAN INPUT LOKASI MANUAL
+  String _buildGeotagWatermarkInfo() {
+    final DateTime now = DateTime.now();
+    final String formattedDate = '${now.day}/${now.month}/${now.year} ${now.hour}:${now.minute.toString().padLeft(2, '0')}:${now.second.toString().padLeft(2, '0')}';
+    
+    return 'Lokasi: ${_locationNameInputController.text}\n'
+           'Koordinat: ${_averagedPosition!.latitude.toStringAsFixed(6)}, ${_averagedPosition!.longitude.toStringAsFixed(6)}\n'
+           'Akurasi: ${_averagedPosition!.accuracy.toStringAsFixed(1)} m\n'
+           'Waktu: $formattedDate\n'
+           'Tipe Item: $_itemType\n' // MENGGUNAKAN STATE BARU
+           'Kondisi: $_condition\n'
+           'Detail: ${_detailsController.text}'; 
+  }
+
   // FUNGSI BARU UNTUK NAMA FILE
   String _buildPhotoFileName() {
     final DateTime now = DateTime.now();
@@ -283,25 +297,11 @@ class _FieldDataScreenState extends State<FieldDataScreen> {
                                      '${now.hour.toString().padLeft(2, '0')}${now.minute.toString().padLeft(2, '0')}${now.second.toString().padLeft(2, '0')}';
     
     // Menghilangkan spasi dan karakter non-alphanumeric dari nama
-    final String safeItemType = _itemTypeController.text.replaceAll(RegExp(r'[^a-zA-Z0-9_]'), '_');
+    final String safeItemType = _itemType.replaceAll(RegExp(r'[^a-zA-Z0-9_]'), '_'); // MENGGUNAKAN STATE BARU
     final String safeCondition = _condition.replaceAll(RegExp(r'[^a-zA-Z0-9_]'), '_');
     
     // Format Final: NamaPohon_Kondisi_YYYYMMDD_HHMMSS
     return '${safeItemType}_${safeCondition}_$formattedDateTime'; 
-  }
-
-  // FUNGSI WATERMARK DENGAN INPUT LOKASI MANUAL
-  String _buildGeotagWatermarkInfo() {
-    final DateTime now = DateTime.now();
-    final String formattedDate = '${now.day}/${now.month}/${now.year} ${now.hour}:${now.minute.toString().padLeft(2, '0')}:${now.second.toString().padLeft(2, '0')}';
-    
-    return 'Lokasi: ${_locationNameInputController.text}\n' // MENGGUNAKAN INPUT MANUAL
-           'Koordinat: ${_averagedPosition!.latitude.toStringAsFixed(6)}, ${_averagedPosition!.longitude.toStringAsFixed(6)}\n'
-           'Akurasi: ${_averagedPosition!.accuracy.toStringAsFixed(1)} m\n'
-           'Waktu: $formattedDate\n'
-           'Tipe Item: ${_itemTypeController.text}\n'
-           'Kondisi: $_condition\n'
-           'Detail: ${_detailsController.text}'; 
   }
 
   Future<void> _takePhoto() async {
@@ -358,7 +358,7 @@ class _FieldDataScreenState extends State<FieldDataScreen> {
       // MENGGUNAKAN INPUT MANUAL
       locationName: _locationNameInputController.text, 
       timestamp: DateTime.now().toIso8601String(),
-      itemType: _itemTypeController.text,
+      itemType: _itemType, // MENGGUNAKAN STATE BARU
       condition: _condition,
       details: _detailsController.text,
       photoPath: _photoPath ?? '', 
@@ -386,9 +386,9 @@ class _FieldDataScreenState extends State<FieldDataScreen> {
       _accuracyText = 'Akurasi: -- m';
       _currentLocationText = 'Lokasi Terkini: --';
       _progress = 0.0;
+      _itemType = 'Pohon 1'; // Reset item type
     });
     _detailsController.clear();
-    _itemTypeController.clear();
     _locationNameInputController.clear(); // NEW: Bersihkan input manual
   }
 
@@ -512,13 +512,17 @@ class _FieldDataScreenState extends State<FieldDataScreen> {
                       ),
                       const SizedBox(height: 10),
 
-                      // Item Type Text Field (changed from dropdown)
-                      TextFormField(
-                        controller: _itemTypeController,
-                        decoration: const InputDecoration(labelText: 'Nama Pohon'),
-                        validator: (value) => value!.isEmpty ? 'Harap masukkan nama pohon' : null,
+                      // NEW: Item Type Dropdown
+                      DropdownButtonFormField<String>(
+                        value: _itemType, 
+                        decoration: const InputDecoration(labelText: 'Jenis Pohon'),
+                        items: _treeTypes.map((treeType) {
+                          return DropdownMenuItem(value: treeType, child: Text(treeType));
+                        }).toList(),
+                        onChanged: (value) => setState(() => _itemType = value!),
+                        validator: (value) => value == null ? 'Harap pilih jenis pohon' : null,
                       ),
-
+                      
                       const SizedBox(height: 10),
 
                       // Condition Dropdown
