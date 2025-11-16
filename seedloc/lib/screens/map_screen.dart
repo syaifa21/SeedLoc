@@ -72,7 +72,7 @@ class _MapScreenState extends State<MapScreen> {
   }
 
   void _startLocationUpdates() {
-    _locationUpdateTimer = Timer.periodic(const Duration(seconds: 5), (timer) {
+    _locationUpdateTimer = Timer.periodic(const Duration(seconds: 5), (Timer) {
       _getCurrentLocation();
     });
   }
@@ -80,16 +80,17 @@ class _MapScreenState extends State<MapScreen> {
   Future<void> _getCurrentLocation() async {
     try {
       Position position = await LocationService.getCurrentPosition();
-      
+
       if (mounted) {
         setState(() {
           _currentPosition = position;
           _currentLocation = LatLng(position.latitude, position.longitude);
           _isLoading = false;
-          _errorMessage = ''; 
+          _errorMessage = '';
         });
 
-        _mapController.move(_currentLocation, 17.0);
+        // Removed auto-move to current location to allow free map scrolling
+        // _mapController.move(_currentLocation, 17.0);
       }
     } catch (e) {
       if (mounted) {
