@@ -1,9 +1,13 @@
 import 'package:flutter/material.dart';
 import '../services/sync_service.dart';
-import '../services/export_service.dart'; 
+import '../services/export_service.dart';
 import '../database/database_helper.dart';
 import '../models/project.dart'; // Digunakan untuk Project? _activeProject
-import 'package:permission_handler/permission_handler.dart'; 
+import 'package:permission_handler/permission_handler.dart';
+import 'package:path_provider/path_provider.dart';
+import 'package:path/path.dart' as path;
+import 'dart:io';
+import 'home_screen.dart';
 
 class SettingsScreen extends StatefulWidget {
   const SettingsScreen({super.key});
@@ -376,11 +380,29 @@ class _SettingsScreenState extends State<SettingsScreen> {
     try {
       DatabaseHelper dbHelper = DatabaseHelper();
       await dbHelper.clearAllData();
+
+      // TAMBAHAN: Hapus semua gambar lokal yang tersimpan
+      try {
+        final Directory appDir = await getApplicationDocumentsDirectory();
+        final String imagesDirPath = path.join(appDir.path, 'images');
+        final Directory imagesDir = Directory(imagesDirPath);
+
+        if (await imagesDir.exists()) {
+          await imagesDir.delete(recursive: true);
+          print('Local images directory cleared');
+        }
+      } catch (e) {
+        print('Error clearing local images: $e');
+      }
+
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('Project dihentikan. Membuat project baru...')),
         );
-        Navigator.of(context).pushNamedAndRemoveUntil('/home', (Route<dynamic> route) => false);
+        // FIX: Gunakan pushReplacement untuk menghindari bug navbar
+        Navigator.of(context).pushReplacement(
+          MaterialPageRoute(builder: (_) => const HomeScreen()),
+        );
       }
     } catch (e) {
       if (mounted) {

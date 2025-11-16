@@ -50,21 +50,21 @@ class ImageService {
     String geotagInfo,
     String customFileName, // Nama file yang digunakan
   ) async {
-    // Menggunakan font yang lebih besar dan jelas
-    final img.BitmapFont font = img.arial14;
+    // Font yang lebih besar untuk visibilitas
+    final img.BitmapFont font = img.arial24; // Naik dari arial14 ke arial24
 
-    // Warna yang lebih kontras: Putih dengan background hitam semi-transparan
+    // Warna yang lebih kontras: Putih dengan background hitam solid
     final img.Color fontColor = img.ColorRgba8(255, 255, 255, 255); // Putih solid
-    final img.Color backgroundColor = img.ColorRgba8(0, 0, 0, 180); // Hitam lebih gelap
+    final img.Color backgroundColor = img.ColorRgba8(0, 0, 0, 220); // Hitam lebih gelap
 
     final List<String> lines = geotagInfo.split('\n');
-    final int lineHeight = font.lineHeight + 6; // Spacing lebih besar
-    final int textHeight = lines.length * lineHeight + 16; // Padding lebih besar
+    final int lineHeight = font.lineHeight + 8; // Spacing lebih besar
+    final int textHeight = lines.length * lineHeight + 24; // Padding lebih besar
 
-    // Tentukan area untuk overlay text (di bagian bawah)
-    final int startY = originalImage.height - textHeight;
+    // STAMPING 1/4 BAGIAN BAWAH FOTO (lebih besar dari sebelumnya)
+    final int startY = originalImage.height - (originalImage.height ~/ 4); // 1/4 bagian bawah
 
-    // Background rectangle untuk text
+    // Background rectangle untuk seluruh area stamping
     img.fillRect(
       originalImage,
       x1: 0,
@@ -74,15 +74,15 @@ class ImageService {
       color: backgroundColor
     );
 
-    int currentY = startY + 12; // Padding atas lebih besar
+    int currentY = startY + 16; // Padding atas lebih besar
 
     for (String line in lines) {
-      // Draw text dengan warna putih solid
+      // Draw text dengan warna putih solid dan font besar
       img.drawString(
         originalImage,
         line,
         font: font,
-        x: 12, // Padding kiri lebih besar
+        x: 16, // Padding kiri lebih besar
         y: currentY,
         color: fontColor,
       );
@@ -108,7 +108,14 @@ class ImageService {
     final int originalSizeEstimate = originalImage.width * originalImage.height * 3; // RGB estimate
     final int quality = originalSizeEstimate > 5000000 ? 75 : 85; // Adaptive quality
 
-    await File(filePath).writeAsBytes(img.encodeJpg(originalImage, quality: quality));
+    // TAMBAHAN: Resize gambar jika terlalu besar untuk mengurangi ukuran file
+    img.Image processedImage = originalImage;
+    if (originalImage.width > 1920 || originalImage.height > 1080) {
+      // Resize ke maksimal 1920x1080 sambil mempertahankan aspect ratio
+      processedImage = img.copyResize(originalImage, width: 1920, height: 1080, maintainAspect: true);
+    }
+
+    await File(filePath).writeAsBytes(img.encodeJpg(processedImage, quality: quality));
 
     return filePath;
   }

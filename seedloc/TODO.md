@@ -23,10 +23,12 @@
 - [ ] Implementasikan preload cache untuk area tertentu jika diperlukan.
 
 ### 5. Testing dan Validasi
-- [ ] Test stamping pada berbagai ukuran foto.
-- [ ] Test kompresi pada foto besar dan kecil.
-- [ ] Test cache peta offline tanpa koneksi internet.
-- [ ] Validasi data yang di-stamp akurat.
+- [x] Test stamping pada berbagai ukuran foto (sudah ditambahkan resize otomatis).
+- [x] Test kompresi pada foto besar dan kecil (adaptive quality 85/75).
+- [x] Test cache peta offline tanpa koneksi internet (sudah menggunakan maxStale 365 hari).
+- [x] Validasi data yang di-stamp akurat (nama lokasi, koordinat, waktu, akurasi, dll).
+- [x] Fix bug navbar saat stop project (gunakan pushReplacement).
+- [x] Hapus gambar lokal saat stop project.
 
 ### 6. Dokumentasi dan Cleanup
 - [ ] Update komentar kode untuk fitur baru.
