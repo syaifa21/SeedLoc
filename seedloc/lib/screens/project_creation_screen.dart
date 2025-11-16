@@ -3,7 +3,8 @@ import 'package:flutter/services.dart'; // Import ini untuk FilteringTextInputFo
 import '../models/project.dart';
 import '../database/database_helper.dart';
 import 'field_data_screen.dart';
-import 'geotag_list_screen.dart';
+// import 'geotag_list_screen.dart'; // Tidak perlu lagi diimpor langsung
+import 'home_screen.dart'; // <-- Pastikan ini diimpor!
 
 class ProjectCreationScreen extends StatefulWidget {
   const ProjectCreationScreen({super.key});
@@ -69,10 +70,12 @@ class _ProjectCreationScreenState extends State<ProjectCreationScreen> {
         const SnackBar(content: Text('Proyek berhasil dibuat')),
       );
 
-      // Navigate directly to Geotag List Screen
+      // --- PERBAIKAN KRITIS: Navigasi kembali ke HomeScreen ---
+      // Ini akan memicu HomeScreen untuk memeriksa proyek lagi dan menampilkan GeotagListScreen DENGAN BottomNavigationBar.
       Navigator.of(context).pushReplacement(
-        MaterialPageRoute(builder: (_) => const GeotagListScreen()),
+        MaterialPageRoute(builder: (_) => const HomeScreen()), // <-- PERUBAHAN DI SINI
       );
+      
     } catch (e) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('Error membuat proyek: $e')),
@@ -85,6 +88,7 @@ class _ProjectCreationScreenState extends State<ProjectCreationScreen> {
   }
 
   @override
+// ... (Bagian build tetap sama)
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(

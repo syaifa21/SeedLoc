@@ -51,7 +51,7 @@ class ImageService {
     String customFileName, // Nama file yang digunakan
   ) async {
     // Font yang lebih besar untuk visibilitas
-    final img.BitmapFont font = img.arial24; // Naik dari arial14 ke arial24
+    final img.BitmapFont font = img.arial48; // Naik dari arial14 ke arial24
 
     // Warna yang lebih kontras: Putih dengan background hitam solid
     final img.Color fontColor = img.ColorRgba8(255, 255, 255, 255); // Putih solid
