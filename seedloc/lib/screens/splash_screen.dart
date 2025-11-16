@@ -33,11 +33,6 @@ class _SplashScreenState extends State<SplashScreen> {
               width: 150,
               height: 150,
             ),
-            const SizedBox(height: 20),
-            Text(
-              'SeedLoc',
-              style: Theme.of(context).textTheme.headlineLarge,
-            ),
             const SizedBox(height: 10),
             Text(
               'Pengumpulan Data Lapangan Geotagging',

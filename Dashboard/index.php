@@ -1,5 +1,6 @@
 <?php
-// Pastikan path ke file config dan db.php di dalam folder api/ sudah benar
+// Dashboard/index.php - Ver. Final Comprehensive (Fix Pop-up Foto & Semua Fitur)
+
 require_once 'api/config.php';
 require_once 'api/db.php';
 
@@ -26,36 +27,80 @@ try {
     ");
 }
 
-// --- 2. FUNGSI AMBIL DATA & PENCARIAN ---
-function fetch_geotags($conn, $search_query = null) {
-    // Menggunakan `condition` (dengan backtick)
+// --- 2. FUNGSI AMBIL DATA & KONTEKS ---
+function fetch_latest_project($conn) {
+    $stmt = $conn->query("SELECT * FROM projects ORDER BY created_at DESC LIMIT 1");
+    return $stmt->fetch(PDO::FETCH_ASSOC);
+}
+
+function fetch_geotags($conn, $search_query = null, $condition_filter = null, $start_date = null, $end_date = null, $limit = 20, $offset = 0, &$total_records = 0) {
     $sql = "SELECT id, latitude, longitude, locationName, timestamp, itemType, `condition`, photoPath, details FROM geotags";
     $params = [];
+    $where = [];
 
-    // Filter berdasarkan query pencarian
+    // Filter Pencarian Dasar
     if ($search_query) {
-        $sql .= " WHERE itemType LIKE ? OR locationName LIKE ?";
+        $where[] = "(itemType LIKE ? OR locationName LIKE ?)";
         $params[] = "%$search_query%";
         $params[] = "%$search_query%";
     }
     
-    $sql .= " ORDER BY id DESC";
+    // Filter Kondisi
+    if ($condition_filter && $condition_filter !== 'all') {
+        $where[] = "`condition` = ?";
+        $params[] = $condition_filter;
+    }
+    
+    // Filter Rentang Tanggal
+    if ($start_date) {
+        $where[] = "timestamp >= ?";
+        $params[] = $start_date . ' 00:00:00';
+    }
+    if ($end_date) {
+        $where[] = "timestamp <= ?";
+        $params[] = $end_date . ' 23:59:59';
+    }
+
+    if (!empty($where)) {
+        $sql .= " WHERE " . implode(' AND ', $where);
+    }
+    
+    // Hitung Total Record (Untuk Paginasi)
+    $countSql = str_replace("SELECT id, latitude, longitude, locationName, timestamp, itemType, `condition`, photoPath, details", "SELECT COUNT(*)", $sql);
+    $stmtCount = $conn->prepare($countSql);
+    $stmtCount->execute($params);
+    $total_records = $stmtCount->fetchColumn();
+
+    // Tambahkan Ordering dan Paginasi
+    $sql .= " ORDER BY id DESC LIMIT $limit OFFSET $offset";
 
     $stmt = $conn->prepare($sql);
     $stmt->execute($params); 
     return $stmt->fetchAll(PDO::FETCH_ASSOC);
 }
 
-// Ambil data pencarian dari URL
-$search_query = isset($_GET['search']) ? trim($_GET['search']) : '';
-$geotags = fetch_geotags($conn, $search_query);
+// --- 3. AMBIL DATA DAN APLIKASIKAN FILTER ---
+$limit = 20;
+$page = isset($_GET['page']) ? (int)$_GET['page'] : 1;
+$offset = ($page - 1) * $limit;
 
-// Encode data untuk JavaScript
+$search_query = isset($_GET['search']) ? trim($_GET['search']) : '';
+$condition_filter = isset($_GET['condition']) ? $_GET['condition'] : 'all';
+$start_date = isset($_GET['start_date']) ? $_GET['start_date'] : '';
+$end_date = isset($_GET['end_date']) ? $_GET['end_date'] : '';
+
+$total_records = 0;
+$geotags = fetch_geotags($conn, $search_query, $condition_filter, $start_date, $end_date, $limit, $offset, $total_records);
+$total_pages = ceil($total_records / $limit);
+
 $geotags_json = json_encode($geotags);
 
-// --- 3. BASE URL untuk Foto ---
-// Ganti menjadi https://seedloc.my.id/api/ jika foto tidak bisa diakses
+// Data Konteks Proyek
+$latest_project = fetch_latest_project($conn);
+
+// --- 4. BASE URL untuk Foto ---
 $photo_base_url = 'https://seedloc.my.id/api/';
+$conditions_list = ['Baik', 'Cukup', 'Buruk', 'Rusak'];
 ?>
 <!DOCTYPE html>
 <html lang="id">
@@ -64,234 +109,75 @@ $photo_base_url = 'https://seedloc.my.id/api/';
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>SeedLoc Web Dashboard</title>
 
-    <!-- Leaflet CSS & Font Awesome (seperti sebelumnya) -->
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css">
-
     <style>
-        /* Warna identitas: hijau utama sesuai pilihan (#2E7D32) */
-        :root {
-            --primary-color: #2E7D32; 
-            --secondary-color: #66BB6A;
-            --background-light: #f4f6f8;
-            --text-dark: #2c3e50;
-            --muted: #7f8c8d;
-            --shadow-subtle: 0 6px 20px rgba(0,0,0,0.06);
-            --radius-default: 10px;
-            --glass: rgba(255,255,255,0.7);
-        }
-
-        /* Reset & base */
+        /* CSS yang dimodifikasi untuk Logo dan UI */
+        :root { --primary-color: #2E7D32; --secondary-color: #66BB6A; --background-light: #f4f6f8; --text-dark: #2c3e50; --muted: #7f8c8d; --shadow-subtle: 0 6px 20px rgba(0,0,0,0.06); --radius-default: 10px; }
         * { box-sizing: border-box; }
         body { 
             font-family: 'Poppins', system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial; 
             margin: 0; 
             background-color: var(--background-light); 
             color: var(--text-dark); 
-            line-height: 1.5;
-            -webkit-font-smoothing: antialiased;
-            -moz-osx-font-smoothing: grayscale;
+            line-height: 1.5; 
         }
-
-        /* Container utama */
-        .container { 
-            max-width: 1220px; 
-            margin: 28px auto; 
-            padding: 26px; 
-            background: linear-gradient(180deg, rgba(255,255,255,0.98), rgba(255,255,255,0.98));
-            box-shadow: var(--shadow-subtle);
-            border-radius: 14px; 
-            min-height: 60vh;
-        }
-
-        /* Header */
-        header.app-header {
-            display: flex;
-            align-items: center;
-            gap: 16px;
-            justify-content: space-between;
-            margin-bottom: 18px;
-        }
-        .brand {
-            display: flex;
-            gap: 12px;
-            align-items: center;
-            text-decoration: none;
-            color: inherit;
-        }
-        .brand .logo {
-            width: 56px;
-            height: 56px;
-            border-radius: 12px;
-            display: inline-flex;
-            align-items: center;
-            justify-content: center;
-            background: linear-gradient(135deg, var(--primary-color), var(--secondary-color));
-            color: #fff;
-            box-shadow: 0 6px 18px rgba(46,125,50,0.15);
-            font-size: 22px;
-            font-weight: 600;
-        }
+        .container { max-width: 1220px; margin: 28px auto; padding: 26px; background: linear-gradient(180deg, rgba(255,255,255,0.98), rgba(255,255,255,0.98)); box-shadow: var(--shadow-subtle); border-radius: 14px; min-height: 60vh; }
+        header.app-header { display: flex; align-items: center; gap: 16px; justify-content: space-between; margin-bottom: 18px; }
+        .brand { display: flex; gap: 12px; align-items: center; text-decoration: none; color: inherit; }
+        .brand .logo { width: 56px; height: 56px; border-radius: 12px; box-shadow: 0 6px 18px rgba(46,125,50,0.15); font-size: 22px; font-weight: 600; padding: 0; background: transparent; }
+        .brand .logo img { width: 100%; height: 100%; object-fit: contain; border-radius: 12px; }
         .brand h1 { font-size: 20px; margin: 0; }
         .brand p { margin: 0; color: var(--muted); font-size: 13px; }
+        .header-actions { display: flex; gap: 10px; align-items: center; }
+        .btn { display: inline-flex; align-items: center; gap: 8px; padding: 8px 12px; border-radius: 8px; border: 1px solid rgba(0,0,0,0.06); background: white; cursor: pointer; font-weight: 600; color: var(--text-dark); text-decoration: none; }
+        .btn.primary { background: var(--primary-color); color: white; border: none; box-shadow: 0 6px 16px rgba(46,125,50,0.12); }
 
-        /* Header actions */
-        .header-actions {
-            display: flex;
-            gap: 10px;
-            align-items: center;
-        }
-        .btn {
-            display: inline-flex;
-            align-items: center;
-            gap: 8px;
-            padding: 8px 12px;
-            border-radius: 8px;
-            border: 1px solid rgba(0,0,0,0.06);
-            background: white;
-            cursor: pointer;
-            font-weight: 600;
-            color: var(--text-dark);
-            text-decoration: none;
-        }
-        .btn.primary {
-            background: var(--primary-color);
-            color: white;
-            border: none;
-            box-shadow: 0 6px 16px rgba(46,125,50,0.12);
-        }
+        .filter-area { display: flex; gap: 10px; margin-bottom: 12px; flex-wrap: wrap; align-items: flex-end;}
+        .filter-area .search-form, .filter-area .date-filter { flex-grow: 1; min-width: 200px;}
+        .filter-area select, .filter-area input[type="text"], .filter-area input[type="date"] { padding: 10px 12px; border: 1px solid #ccc; border-radius: 8px; font-size: 14px; width: 100%; }
+        .filter-area label { font-size: 12px; color: var(--muted); font-weight: 600; margin-bottom: 4px; display: block; }
+        .filter-area button { padding: 10px 18px; background-color: #3498db; color: white; border: none; border-radius: 8px; cursor: pointer; font-weight: 700; transition: background-color 0.3s; }
+        .filter-area button:hover { background-color: #2980b9; }
 
-        /* Search form (preserve layout) */
-        .search-form { 
-            display: flex; 
-            margin: 12px 0 18px 0; 
-            border-radius: 10px;
-            overflow: hidden;
-            border: 1px solid #e6e9ec;
-            background: #fff;
-        }
-        .search-form input[type="text"] { 
-            flex-grow: 1; 
-            padding: 14px 16px; 
-            border: none;
-            font-size: 15px; 
-            outline: none;
-        }
-        .search-form button { 
-            padding: 12px 18px; 
-            background-color: var(--primary-color); 
-            color: white; 
-            border: none; 
-            cursor: pointer; 
-            font-size: 15px; 
-            font-weight: 700;
-        }
-        .search-form button i { margin-right: 8px; }
-
-        /* Info stats */
-        .data-stats {
-            background-color: rgba(46,125,50,0.06);
-            padding: 14px 18px;
-            border-radius: 12px;
-            margin-bottom: 18px;
-            display: flex;
-            gap: 12px;
-            align-items: center;
-            justify-content: space-between;
-            flex-wrap: wrap;
-            border-left: 4px solid var(--secondary-color);
-        }
+        .data-stats { background-color: rgba(46,125,50,0.06); padding: 14px 18px; border-radius: 12px; margin-bottom: 18px; display: flex; gap: 12px; align-items: center; justify-content: space-between; flex-wrap: wrap; border-left: 4px solid var(--secondary-color); }
         .stats-left { display:flex; gap:14px; align-items:center; }
         .stats-left p { margin: 0; color: var(--muted); font-weight: 600; }
         .stats-left p strong { color: var(--primary-color); font-size: 1.1em; }
-
-        /* Tabs untuk Peta/Tabel */
-        .tabs {
-            display:flex;
-            gap:8px;
-            margin-bottom: 12px;
+        
+        .tabs { display:flex; gap:8px; margin-bottom: 12px; }
+        .tab { padding: 8px 14px; border-radius: 10px; border: 1px solid transparent; background: rgba(255,255,255,0.9); cursor: pointer; font-weight: 600; }
+        .tab[aria-selected="true"] { 
+            background: linear-gradient(90deg, var(--primary-color), var(--secondary-color)); 
+            color: white; 
+            box-shadow: 0 8px 20px rgba(46,125,50,0.12); 
+            border-color: rgba(0,0,0,0.04); 
         }
-        .tab {
-            padding: 8px 14px;
-            border-radius: 10px;
-            border: 1px solid transparent;
-            background: rgba(255,255,255,0.9);
-            cursor: pointer;
-            font-weight: 600;
-        }
-        .tab[aria-selected="true"] {
-            background: linear-gradient(90deg, var(--primary-color), var(--secondary-color));
-            color: white;
-            box-shadow: 0 8px 20px rgba(46,125,50,0.12);
-            border-color: rgba(0,0,0,0.04);
-        }
-
-        /* Area map & table wrapper */
-        .panel {
-            display: none;
-        }
+        .panel { display: none; }
         .panel.active { display: block; }
 
-        /* Map area */
-        #mapid { 
-            height: 560px; 
-            border-radius: 12px; 
-            margin-bottom: 18px; 
-            border: 1px solid #e6e9ec; 
-            box-shadow: var(--shadow-subtle);
-        }
-
-        /* Table styles (retain original but improved) */
-        .data-table-container { 
-            overflow: auto; 
-            max-height: 560px;
-            border: 1px solid #e6e9ec;
-            border-radius: 12px;
-            box-shadow: var(--shadow-subtle);
-            background: white;
-        }
-        .data-table { 
-            width: 100%; 
-            border-collapse: collapse; 
-            min-width: 900px;
-        }
-        .data-table th, .data-table td { 
-            padding: 14px 16px; 
-            text-align: left; 
-            border-bottom: 1px solid #f1f4f6; 
-            font-size: 14px; 
-            vertical-align: middle;
-        }
-        .data-table th { 
-            background-color: #fbfdfe; 
-            color: var(--muted); 
-            position: sticky; 
-            top: 0; 
-            z-index: 2;
-            text-transform: uppercase;
-            font-size: 12px;
-            letter-spacing: 0.04em;
-        }
+        #mapid { height: 560px; border-radius: 12px; margin-bottom: 18px; border: 1px solid #e6e9ec; box-shadow: var(--shadow-subtle); }
+        .data-table-container { overflow: auto; max-height: 560px; border: 1px solid #e6e9ec; border-radius: 12px; box-shadow: var(--shadow-subtle); background: white; }
+        .data-table { width: 100%; border-collapse: collapse; min-width: 900px; }
+        .data-table th, .data-table td { padding: 14px 16px; text-align: left; border-bottom: 1px solid #f1f4f6; font-size: 14px; vertical-align: middle; }
+        .data-table th { background-color: #fbfdfe; color: var(--muted); position: sticky; top: 0; z-index: 2; text-transform: uppercase; font-size: 12px; letter-spacing: 0.04em; }
         .data-table tr:hover { background: #fbfff9; cursor: pointer; }
-        .row-action { font-size: 13px; color: var(--primary-color); font-weight: 700; text-decoration: none; }
-
-        .photo-thumb { 
-            width: 72px; 
-            height: 72px; 
-            object-fit: cover; 
-            border-radius: 8px; 
-            cursor: pointer; 
-            border: 2px solid #f0f0f0; 
-            transition: transform 0.18s, box-shadow 0.18s; 
-        }
+        .photo-thumb { width: 72px; height: 72px; object-fit: cover; border-radius: 8px; cursor: pointer; border: 2px solid #f0f0f0; transition: transform 0.18s, box-shadow 0.18s; }
         .photo-thumb:hover { transform: scale(1.06); box-shadow: 0 8px 22px rgba(0,0,0,0.08); border-color: var(--secondary-color); }
-
-        /* Popup styling for leaflet (keep small) */
         .popup-content strong { color: var(--primary-color); }
         .popup-content p { font-size: 13px; margin: 4px 0; color: #384048; }
 
-        /* Modal Foto (lebih elegan) */
+        /* Paginasi */
+        .pagination { margin-top: 15px; display: flex; justify-content: center; align-items: center; gap: 8px; }
+        .pagination a, .pagination span { text-decoration: none; padding: 6px 12px; border-radius: 6px; border: 1px solid #ddd; color: var(--text-dark); font-weight: 600; }
+        .pagination a:hover { background: #eee; }
+        .pagination .current { background: var(--primary-color); color: white; border-color: var(--primary-color); }
+        
+        .project-context { background-color: #ecf0f1; padding: 12px 18px; border-radius: 8px; margin-bottom: 15px; border-left: 3px solid #3498db; }
+        .project-context p { margin: 5px 0; font-size: 14px; }
+
+        /* Modal Foto */
         .modal { 
             display: none; 
             position: fixed; 
@@ -330,8 +216,8 @@ $photo_base_url = 'https://seedloc.my.id/api/';
             justify-content: center;
         }
         .modal-caption { padding: 12px 18px; background: white; color: var(--muted); font-size: 13px; }
-
-        /* Loading overlay for map */
+        
+        /* Loading overlay */
         .loading-overlay {
             position: absolute;
             inset: 0;
@@ -349,17 +235,6 @@ $photo_base_url = 'https://seedloc.my.id/api/';
             box-shadow: 0 8px 20px rgba(46,125,50,0.12);
         }
         @keyframes spin { to { transform: rotate(360deg); } }
-
-        /* Footer */
-        footer { margin-top: 18px; color: var(--muted); font-size: 13px; text-align: center; }
-
-        /* Responsif */
-        @media (max-width: 900px) {
-            #mapid, .data-table-container { max-height: 420px; }
-            .brand h1 { font-size: 18px; }
-            .search-form { flex-direction: column; gap:8px; }
-            .data-table { min-width: 760px; }
-        }
     </style>
 </head>
 <body>
@@ -367,7 +242,9 @@ $photo_base_url = 'https://seedloc.my.id/api/';
 <div class="container" role="main">
     <header class="app-header" role="banner">
         <a class="brand" href="index.php" aria-label="SeedLoc Dashboard">
-            <div class="logo" aria-hidden="true">SL</div>
+            <div class="logo" aria-hidden="true">
+                <img src="https://seedloc.my.id/logo.png" alt="SeedLoc Logo">
+            </div>
             <div>
                 <h1>SeedLoc Dashboard</h1>
                 <p>Geotag & dokumentasi lapangan — Sistem internal</p>
@@ -376,52 +253,79 @@ $photo_base_url = 'https://seedloc.my.id/api/';
 
         <div class="header-actions" role="navigation" aria-label="Aksi cepat">
             <a class="btn" href="api/help.pdf" target="_blank" rel="noopener"> <i class="fas fa-file-alt"></i> Panduan </a>
-            <a class="btn primary" href="#" onclick="document.getElementById('searchInput').focus(); return false;"><i class="fas fa-search"></i> Cari</a>
+            <a class="btn" href="admin.php" target="_blank" rel="noopener"> <i class="fas fa-user-shield"></i> Admin Panel </a>
         </div>
     </header>
 
-    <!-- Search -->
-    <form class="search-form" method="GET" action="index.php" role="search" aria-label="Pencarian geotag">
-        <input id="searchInput" type="text" name="search" placeholder="Cari Nama Pohon (itemType) atau Nama Lokasi..." value="<?php echo htmlspecialchars($search_query); ?>" aria-label="Masukkan kata kunci pencarian">
-        <button type="submit" aria-label="Cari data"><i class="fas fa-search"></i> Cari</button>
+    <?php if ($latest_project): ?>
+    <div class="project-context">
+        <p><strong><i class="fas fa-folder-open"></i> Proyek Aktif Terakhir:</strong></p>
+        <p>Kegiatan: <strong><?php echo htmlspecialchars($latest_project['activityName']); ?></strong> (ID: <?php echo htmlspecialchars($latest_project['projectId']); ?>) | Lokasi: <?php echo htmlspecialchars($latest_project['locationName']); ?> | Petugas: <?php echo htmlspecialchars($latest_project['officers']); ?></p>
+    </div>
+    <?php endif; ?>
+
+    <form class="filter-area" method="GET" action="index.php" role="search" aria-label="Filter data geotag">
+        
+        <div class="search-form">
+            <label for="searchInput">Cari Nama/Lokasi</label>
+            <input id="searchInput" type="text" name="search" placeholder="Cari Nama Pohon atau Lokasi..." value="<?php echo htmlspecialchars($search_query); ?>">
+        </div>
+
+        <div class="date-filter">
+            <label for="conditionFilter">Filter Kondisi</label>
+            <select name="condition" id="conditionFilter">
+                <option value="all">-- Semua Kondisi --</option>
+                <?php 
+                $conditions_list = ['Baik', 'Cukup', 'Buruk', 'Rusak'];
+                foreach ($conditions_list as $cond): ?>
+                    <option value="<?php echo $cond; ?>" <?php echo (isset($condition_filter) && $condition_filter === $cond) ? 'selected' : ''; ?>>
+                        <?php echo $cond; ?>
+                    </option>
+                <?php endforeach; ?>
+            </select>
+        </div>
+
+        <div class="date-filter">
+            <label for="startDate">Mulai Tanggal</label>
+            <input type="date" name="start_date" id="startDate" value="<?php echo (isset($start_date)) ? htmlspecialchars($start_date) : ''; ?>">
+        </div>
+        
+        <div class="date-filter">
+            <label for="endDate">Sampai Tanggal</label>
+            <input type="date" name="end_date" id="endDate" value="<?php echo (isset($end_date)) ? htmlspecialchars($end_date) : ''; ?>">
+        </div>
+
+        <button type="submit" aria-label="Terapkan Filter"><i class="fas fa-filter"></i> Filter</button>
+        <?php if ($search_query || (isset($condition_filter) && $condition_filter !== 'all') || isset($start_date) || isset($end_date)): ?>
+            <a href="index.php" class="btn" title="Hapus semua filter" style="background: #e74c3c; color: white; font-weight: 700;"><i class="fas fa-times-circle"></i> Reset</a>
+        <?php endif; ?>
     </form>
 
-    <!-- Statistik ringkas -->
     <div class="data-stats" role="status" aria-live="polite">
         <div class="stats-left">
-            <p>Total Data: <strong><?php echo count($geotags); ?></strong></p>
-            <?php if ($search_query): ?>
-                <p class="search-info">Menampilkan hasil pencarian untuk: "<strong><?php echo htmlspecialchars($search_query); ?></strong>"</p>
-            <?php endif; ?>
-        </div>
-        <div>
-            <?php if ($search_query): ?>
-                <a href="index.php" class="btn" title="Hapus filter"><i class="fas fa-times-circle"></i> Hapus Filter</a>
-            <?php else: ?>
-                <span style="color: var(--muted); font-weight:600;">Versi: 1.0 — <?php echo date('Y'); ?></span>
+            <p>Total Data Ditemukan: <strong><?php echo $total_records; ?></strong></p>
+            <?php if ($search_query || (isset($condition_filter) && $condition_filter !== 'all') || isset($start_date) || isset($end_date)): ?>
+                <p class="search-info">Hasil Filter: <strong><?php echo $total_records; ?></strong> dari Total Halaman: <strong><?php echo $total_pages; ?></strong></p>
             <?php endif; ?>
         </div>
     </div>
 
-    <!-- Tabs: Map / Table -->
     <div class="tabs" role="tablist" aria-label="Tampilan">
         <button class="tab" role="tab" aria-selected="true" data-target="panel-map" id="tab-map"> <i class="fas fa-map-marked-alt"></i> Peta </button>
         <button class="tab" role="tab" aria-selected="false" data-target="panel-table" id="tab-table"> <i class="fas fa-table"></i> Tabel </button>
     </div>
 
-    <!-- Panel Map -->
     <div id="panel-map" class="panel active" role="tabpanel" aria-labelledby="tab-map">
         <div style="position:relative;">
             <div id="mapid" aria-label="Peta geotag"></div>
             <div id="mapLoading" class="loading-overlay" aria-hidden="true">
                 <div class="spinner" role="status" aria-label="Memuat peta"></div>
             </div>
-        </div>
+            </div>
     </div>
 
-    <!-- Panel Table -->
     <div id="panel-table" class="panel" role="tabpanel" aria-labelledby="tab-table">
-        <h2 style="margin: 12px 0 10px 0; font-size: 18px; color: var(--primary-color);"><i class="fas fa-list-alt"></i> Daftar Data Geotag Terbaru</h2>
+        <h2 style="margin: 12px 0 10px 0; font-size: 18px; color: var(--primary-color);"><i class="fas fa-list-alt"></i> Data Geotag (Halaman <?php echo $page; ?>)</h2>
 
         <div class="data-table-container" aria-live="polite">
             <table class="data-table" id="dataTable" role="table" aria-label="Tabel data geotag">
@@ -474,7 +378,7 @@ $photo_base_url = 'https://seedloc.my.id/api/';
                                          alt="Foto" 
                                          class="photo-thumb" 
                                          title="Klik untuk Lihat"
-                                         onclick="event.stopPropagation(); openModal('<?php echo $photo_full_url; ?>', '<?php echo htmlspecialchars($tag['itemType']); ?>', '<?php echo htmlspecialchars($tag['locationName']); ?>')">
+                                         onclick="event.stopPropagation(); openModal(<?php echo json_encode($photo_full_url); ?>, <?php echo json_encode(htmlspecialchars($tag['itemType'])); ?>, <?php echo json_encode(htmlspecialchars($tag['locationName'])); ?>)">
                                 <?php else: ?>
                                     -
                                 <?php endif; ?>
@@ -485,6 +389,27 @@ $photo_base_url = 'https://seedloc.my.id/api/';
                 </tbody>
             </table>
         </div>
+
+        <div class="pagination">
+            <?php 
+            $queryString = http_build_query(array_filter(['search' => $search_query, 'condition' => $condition_filter, 'start_date' => $start_date, 'end_date' => $end_date]));
+            
+            if ($page > 1): ?>
+                <a href="?<?php echo $queryString; ?>&page=<?php echo $page - 1; ?>">« Sebelumnya</a>
+            <?php endif; 
+            
+            for ($i = 1; $i <= $total_pages; $i++):
+                if ($i === $page): ?>
+                    <span class="current"><?php echo $i; ?></span>
+                <?php else: ?>
+                    <a href="?<?php echo $queryString; ?>&page=<?php echo $i; ?>"><?php echo $i; ?></a>
+                <?php endif;
+            endfor;
+
+            if ($page < $total_pages): ?>
+                <a href="?<?php echo $queryString; ?>&page=<?php echo $page + 1; ?>">Berikutnya »</a>
+            <?php endif; ?>
+        </div>
     </div>
 
     <footer>
@@ -492,7 +417,6 @@ $photo_base_url = 'https://seedloc.my.id/api/';
     </footer>
 </div>
 
-<!-- Modal Foto (aksesibel) -->
 <div id="photoModal" class="modal" role="dialog" aria-modal="true" aria-hidden="true" aria-labelledby="modalCaption">
     <div style="position: relative; width: 100%; max-width: 1100px;">
         <button class="modal-close" aria-label="Tutup" onclick="closeModal()"><i class="fas fa-times"></i></button>
@@ -508,36 +432,13 @@ $photo_base_url = 'https://seedloc.my.id/api/';
     const geotagsData = <?php echo $geotags_json; ?> || [];
     const PHOTO_BASE_URL = '<?php echo $photo_base_url; ?>';
 
-    // Tab switching (Map / Table)
-    (function(){
-        const tabs = document.querySelectorAll('.tab');
-        tabs.forEach(tab => {
-            tab.addEventListener('click', function(){
-                // Deselect all
-                tabs.forEach(t => t.setAttribute('aria-selected','false'));
-                this.setAttribute('aria-selected','true');
-
-                // Toggle panels
-                document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
-                const target = document.getElementById(this.dataset.target);
-                if (target) target.classList.add('active');
-
-                // If map tab opened, invalidate map size after a moment
-                if (this.dataset.target === 'panel-map' && window._seedloc_map) {
-                    setTimeout(() => {
-                        try { window._seedloc_map.invalidateSize(); } catch(e) {}
-                    }, 260);
-                }
-            });
-        });
-    })();
-
     // --- Modal Foto ---
     const modal = document.getElementById('photoModal');
     const modalImage = document.getElementById('modalImage');
     const modalCaption = document.getElementById('modalCaption');
     let lastFocused = null;
 
+    // FUNGSI INI AKAN DIPANGGIL KETIKA THUMBNAIL DI KLIK
     function openModal(photoUrl, title = '', location = '') {
         if (!photoUrl) return;
         lastFocused = document.activeElement;
@@ -546,7 +447,6 @@ $photo_base_url = 'https://seedloc.my.id/api/';
         modalImage.src = photoUrl;
         modalImage.alt = title ? `${title} - ${location}` : 'Foto geotag';
         modalCaption.textContent = title ? `${title} — ${location}` : location || '';
-        // trap focus to close button
         const closeBtn = modal.querySelector('.modal-close');
         if (closeBtn) closeBtn.focus();
         document.body.style.overflow = 'hidden';
@@ -561,16 +461,45 @@ $photo_base_url = 'https://seedloc.my.id/api/';
         if (lastFocused) lastFocused.focus();
     }
 
-    // close modal on overlay click
     modal.addEventListener('click', function(e){
         if (e.target === modal) closeModal();
     });
-    // close on ESC
     document.addEventListener('keydown', function(e){
         if (e.key === 'Escape' && modal.classList.contains('open')) closeModal();
     });
 
-    // --- Leaflet Map Initialization ---
+    // --- Tab Switching Logic (Fix Tombol Tabel) ---
+    (function(){
+        const tabs = document.querySelectorAll('.tab');
+        
+        tabs.forEach(tab => {
+            tab.addEventListener('click', function(){
+                // 1. Ganti status selected pada tombol
+                tabs.forEach(t => t.setAttribute('aria-selected','false'));
+                this.setAttribute('aria-selected','true');
+
+                // 2. Tampilkan panel yang sesuai
+                document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
+                const target = document.getElementById(this.dataset.target);
+                if (target) target.classList.add('active');
+
+                // 3. PENTING: Memaksa peta untuk mengukur ulang ukurannya saat tab 'Peta' diaktifkan
+                if (this.dataset.target === 'panel-map' && window._seedloc_map) {
+                    setTimeout(() => { 
+                        try { 
+                            window._seedloc_map.invalidateSize(); 
+                        } catch(e) {
+                            console.error('Error invalidating map size:', e);
+                        }
+                    }, 260);
+                }
+            });
+        });
+    })();
+    // --- Akhir Tab Switching Logic ---
+
+
+    // --- Leaflet Map Initialization (Versi Dasar) ---
     function initializeMap() {
         const mapEl = document.getElementById('mapid');
         const loadingOverlay = document.getElementById('mapLoading');
@@ -578,39 +507,37 @@ $photo_base_url = 'https://seedloc.my.id/api/';
 
         loadingOverlay.classList.add('show');
 
-        // Default center (Jakarta) if no valid coords
         const defaultCenter = [-6.2088, 106.8456];
-
-        // Find a valid initial center
         let initialCenter = defaultCenter;
-        for (const g of geotagsData) {
+        
+        const validGeotags = geotagsData.filter(g => {
             const lat = parseFloat(g.latitude);
             const lng = parseFloat(g.longitude);
-            if (!isNaN(lat) && !isNaN(lng) && (lat !== 0 || lng !== 0)) {
-                initialCenter = [lat, lng];
-                break;
-            }
+            return !isNaN(lat) && !isNaN(lng) && (lat !== 0 || lng !== 0);
+        });
+
+        if (validGeotags.length > 0) {
+            initialCenter = [parseFloat(validGeotags[0].latitude), parseFloat(validGeotags[0].longitude)];
         }
 
-        // Create map
         try {
-            const map = L.map('mapid', { preferCanvas: true }).setView(initialCenter, 13);
-            window._seedloc_map = map; // expose for other functions
+            // Inisialisasi peta dasar
+            const map = L.map('mapid', { preferCanvas: true, zoomControl: true }).setView(initialCenter, 13);
+            window._seedloc_map = map; 
 
+            // Layer OSM default
             L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
                 maxZoom: 19,
                 subdomains: ['a','b','c'],
                 attribution: '&copy; OpenStreetMap contributors'
             }).addTo(map);
 
-            // Prepare markers map keyed by id
             const markersById = {};
             const bounds = [];
 
-            geotagsData.forEach(geotag => {
+            validGeotags.forEach(geotag => {
                 const lat = parseFloat(geotag.latitude);
                 const lng = parseFloat(geotag.longitude);
-                if (isNaN(lat) || isNaN(lng) || (lat === 0 && lng === 0)) return;
 
                 bounds.push([lat,lng]);
 
@@ -623,13 +550,8 @@ $photo_base_url = 'https://seedloc.my.id/api/';
                     }
                 }
 
-                // Parse time safely
                 let dateObj;
-                try {
-                    dateObj = new Date(geotag.timestamp.replace(' ', 'T'));
-                } catch(e) {
-                    dateObj = new Date(geotag.timestamp);
-                }
+                try { dateObj = new Date(geotag.timestamp.replace(' ', 'T')); } catch(e) { dateObj = new Date(geotag.timestamp); }
                 const formattedTime = isNaN(dateObj.getTime()) ? geotag.timestamp : dateObj.toLocaleString('id-ID', {day:'2-digit', month:'2-digit', year:'numeric', hour:'2-digit', minute:'2-digit', second:'2-digit'});
 
                 const popupContent = `
@@ -643,7 +565,7 @@ $photo_base_url = 'https://seedloc.my.id/api/';
                         <p><strong>Kondisi:</strong> <span style="font-weight:600;color:#2980b9;">${escapeHtml(geotag.condition || '-')}</span></p>
                         <p><strong>Waktu:</strong> <i class="far fa-clock"></i> ${formattedTime}</p>
                         <hr style="margin:8px 0;">
-                        ${photoUrl ? `<a href="javascript:void(0)" onclick="openModal('${photoUrl.replace(/'/g, '\\\\\'')}', '${escapeAttr(geotag.itemType)}', '${escapeAttr(geotag.locationName)}')" style="color: var(--secondary-color); font-weight:700;"><i class="fas fa-camera"></i> Lihat Foto</a>` : 'Tidak ada Foto'}
+                        ${photoUrl ? `<a href="javascript:void(0)" onclick="openModal('${escapeHtml(photoUrl)}', '${escapeHtml(geotag.itemType)}', '${escapeHtml(geotag.locationName)}')" style="color: var(--secondary-color); font-weight:700;"><i class="fas fa-camera"></i> Lihat Foto</a>` : 'Tidak ada Foto'}
                     </div>
                 `;
 
@@ -651,17 +573,16 @@ $photo_base_url = 'https://seedloc.my.id/api/';
                 markersById[String(geotag.id)] = marker;
             });
 
-            // Fit bounds if exist
             if (bounds.length > 0) {
                 map.fitBounds(bounds, { padding: [30,30], maxZoom: 16 });
             } else {
                 map.setView(initialCenter, 13);
             }
 
-            // After map settled, hide loading
-            setTimeout(() => loadingOverlay.classList.remove('show'), 600);
-
-            // Save markers map globally to allow table interaction
+            setTimeout(() => {
+                loadingOverlay.classList.remove('show');
+                map.invalidateSize(); 
+            }, 600);
             window._seedloc_markers = markersById;
 
         } catch (err) {
@@ -669,48 +590,44 @@ $photo_base_url = 'https://seedloc.my.id/api/';
             document.getElementById('mapid').innerHTML = '<div style="padding:40px; text-align:center; color:#c0392b;">Peta gagal dimuat. Periksa koneksi library Leaflet atau kontainer peta.</div>';
             loadingOverlay.classList.remove('show');
         }
-    } // initializeMap
+    } 
 
-    // Utility: escape HTML for popup content
     function escapeHtml(str) {
         if (!str) return '';
         return String(str).replace(/[&<>"']/g, function(m) {
             return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m];
         });
     }
-    function escapeAttr(str) {
-        return escapeHtml(str).replace(/"/g, '&quot;');
-    }
 
     // Table row click to focus marker on map
     (function(){
         document.addEventListener('click', function(e){
             const tr = e.target.closest('.data-row');
-            if (!tr) return;
+            // Mencegah klik di dalam thumbnail foto memicu aksi pindah peta
+            if (!tr || e.target.classList.contains('photo-thumb')) return; 
+            
             const id = tr.dataset.id;
             const lat = parseFloat(tr.dataset.lat);
             const lng = parseFloat(tr.dataset.lng);
 
-            // Switch to map tab if not active
             const mapTab = document.getElementById('tab-map');
             if (mapTab.getAttribute('aria-selected') !== 'true') {
                 mapTab.click();
             }
 
-            // Wait until map exists
             setTimeout(() => {
-                if (window._seedloc_markers && window._seedloc_markers[id]) {
-                    const marker = window._seedloc_markers[id];
-                    try {
-                        marker.openPopup();
-                        window._seedloc_map.setView(marker.getLatLng(), 16, { animate: true });
-                    } catch(e) {
-                        // fallback: panTo
-                        window._seedloc_map.panTo([lat,lng], { animate: true });
+                if (window._seedloc_map) {
+                    if (window._seedloc_markers && window._seedloc_markers[id]) {
+                        const marker = window._seedloc_markers[id];
+                        try {
+                            marker.openPopup();
+                            window._seedloc_map.setView(marker.getLatLng(), 16, { animate: true });
+                        } catch(e) {
+                            window._seedloc_map.panTo([lat,lng], { animate: true });
+                        }
+                    } else if (!isNaN(lat) && !isNaN(lng)) {
+                        try { window._seedloc_map.setView([lat,lng], 15, { animate: true }); } catch(e){}
                     }
-                } else if (!isNaN(lat) && !isNaN(lng)) {
-                    // If no marker exists (maybe filtered), pan to coordinates
-                    try { window._seedloc_map.setView([lat,lng], 15, { animate: true }); } catch(e){}
                 }
             }, 350);
         });

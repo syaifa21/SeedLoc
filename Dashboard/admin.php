@@ -1,6 +1,5 @@
 <?php
-// admin.php
-// Admin sederhana untuk CRUD Dual-Tabel: geotags & projects
+// admin.php - Ver. Final Comprehensive (FIXED: Unknown column 'table' & Filter)
 
 session_start();
 
@@ -14,6 +13,7 @@ $dsn = "mysql:host=$db_host;dbname=$db_name;charset=utf8mb4";
 // Hidden Password Hash (ali210103)
 $PASSWORD_HASH = 'e0a4cb68ee74255ea69548de2d27e40aa5aaaed8b0b14bb0caab9f9124cc6b64';
 $photo_base_url = 'https://seedloc.my.id/api/';
+$upload_dir = '../api/uploads/'; // Path relatif ke direktori upload
 
 // [DUAL-TABLE LOGIC]
 $current_table_param = $_GET['table'] ?? 'geotags'; 
@@ -42,6 +42,22 @@ try {
     ");
 }
 
+// FUNGSI BARU: Ambil semua Project untuk filter
+function fetch_all_projects($pdo) {
+    $stmt = $pdo->query("SELECT projectId, activityName FROM projects ORDER BY projectId DESC");
+    return $stmt->fetchAll(PDO::FETCH_ASSOC);
+}
+
+
+// Filter variables (Ditarik dari GET request)
+$search_query = $_GET['search'] ?? '';
+$condition_filter = $_GET['condition'] ?? 'all';
+$start_date = $_GET['start_date'] ?? '';
+$end_date = $_GET['end_date'] ?? '';
+$project_id_filter = $_GET['projectId'] ?? 'all'; // NEW: Project ID filter
+$conditions_list = ['Baik', 'Cukup', 'Buruk', 'Rusak']; 
+
+
 // CSRF & Auth functions remain the same
 if (!isset($_SESSION['csrf_token'])) {
     $_SESSION['csrf_token'] = bin2hex(random_bytes(16));
@@ -57,6 +73,20 @@ function require_auth() {
         exit;
     }
 }
+
+// --- PENINGKATAN KEAMANAN: SESSION TIMEOUT (30 MENIT) ---
+$session_timeout = 1800; // 30 menit
+if (is_authenticated()) {
+    if (isset($_SESSION['auth_time']) && (time() - $_SESSION['auth_time'] > $session_timeout)) {
+        session_unset();
+        session_destroy();
+        header('Location: ?action=login&timeout=1');
+        exit;
+    }
+    $_SESSION['auth_time'] = time(); // Update session time on activity
+}
+// --- AKHIR SESSION TIMEOUT ---
+
 
 // ---------- LOGIN / AUTHENTICATION ----------
 if (isset($_GET['action']) && $_GET['action'] === 'logout') {
@@ -78,7 +108,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['login'])) {
         $input_hash = hash('sha256', $input);
         if (hash_equals($input_hash, $PASSWORD_HASH)) {
             $_SESSION['auth'] = true;
-            $_SESSION['auth_time'] = time();
+            $_SESSION['auth_time'] = time(); // Set initial session time
             header('Location: admin.php');
             exit;
         } else {
@@ -93,18 +123,149 @@ if ($action !== 'login') {
     require_auth();
 }
 
-// -------------- CRUD HANDLERS (Create, Update, Delete) ----------------
+// FUNGSI HELPER: Hapus File Foto Fisik
+function delete_photo_file($pdo, $table, $pk, $id, $upload_dir) {
+    if ($table !== 'geotags') return;
+
+    $stmt = $pdo->prepare("SELECT photoPath FROM `$table` WHERE `$pk` = :id LIMIT 1");
+    $stmt->execute([':id' => $id]);
+    $row = $stmt->fetch();
+    
+    if ($row && !empty($row['photoPath'])) {
+        // Hapus path API base url jika ada, ambil hanya nama file/path
+        $filename_in_db = basename($row['photoPath']);
+        $file_path = $upload_dir . $filename_in_db;
+        
+        // Pastikan bukan URL eksternal yang dimulai dengan http/https
+        if (strpos($row['photoPath'], 'http') !== 0 && file_exists($file_path)) {
+            @unlink($file_path);
+        }
+    }
+}
+
+// FUNGSI INLINE: Export Geotags yang dipilih ke CSV
+function export_geotags_to_csv($pdo, $selected_ids, $photo_base_url) {
+    if (empty($selected_ids)) return; 
+    
+    $placeholders = implode(',', array_fill(0, count($selected_ids), '?'));
+    
+    $sql = "SELECT id, projectId, latitude, longitude, locationName, timestamp, itemType, `condition`, details, photoPath, isSynced, deviceId FROM geotags WHERE id IN ($placeholders) ORDER BY id DESC";
+
+    $stmt = $pdo->prepare($sql);
+    $stmt->execute($selected_ids);
+    $geotags = $stmt->fetchAll(PDO::FETCH_ASSOC);
+    
+    if (empty($geotags)) return; 
+
+    $filename = "seedloc_geotags_selected_" . date('Ymd_His') . ".csv";
+
+    header('Content-Type: text/csv; charset=utf-8');
+    header('Content-Disposition: attachment; filename="' . $filename . '"');
+    header('Pragma: no-cache');
+    header('Expires: 0');
+
+    $output = fopen('php://output', 'w');
+
+    fputcsv($output, [
+        'ID', 
+        'Project ID', 
+        'Latitude', 
+        'Longitude', 
+        'Location Name', 
+        'Timestamp', 
+        'Item Type', 
+        'Condition', 
+        'Details', 
+        'Photo Path (Full URL)',
+        'Is Synced',
+        'Device ID'
+    ]);
+
+    foreach ($geotags as $row) {
+        $photo_path = $row['photoPath'];
+        
+        if (!empty($photo_path) && strpos($photo_path, 'http') !== 0) {
+            $row['photoPath'] = $photo_base_url . $photo_path; 
+        }
+        
+        fputcsv($output, array_values($row));
+    }
+
+    fclose($output);
+    exit; 
+}
+
+
+// -------------- CRUD HANDLERS (Create, Update, Delete, Bulk) ----------------
+
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['bulk_action'])) {
+    if (!hash_equals($_SESSION['csrf_token'], $_POST['csrf_token'] ?? '')) die('CSRF mismatch');
+    $selected_ids = $_POST['selected_ids'] ?? [];
+    $bulk_action_type = $_POST['bulk_action_type'] ?? '';
+    $success_count = 0;
+
+    if (empty($selected_ids)) {
+        $error = "Tidak ada item yang dipilih untuk aksi massal.";
+    } else {
+        // --- LOGIKA EXPORT ---
+        if ($bulk_action_type === 'export_selected' && $table === 'geotags') {
+            export_geotags_to_csv($pdo, $selected_ids, $photo_base_url); 
+        }
+        // --- AKHIR LOGIKA EXPORT ---
+
+        $placeholders = implode(',', array_fill(0, count($selected_ids), '?'));
+        $success = true;
+
+        try {
+            $pdo->beginTransaction();
+            if ($bulk_action_type === 'delete_selected') {
+                if ($table === 'geotags') {
+                    foreach ($selected_ids as $id) {
+                        delete_photo_file($pdo, $table, $pk, $id, $upload_dir);
+                    }
+                }
+                $sql = "DELETE FROM `$table` WHERE `$pk` IN ($placeholders)";
+                $stmt = $pdo->prepare($sql);
+                $stmt->execute($selected_ids);
+                $success_count = $stmt->rowCount();
+                $pdo->commit();
+                $success = true;
+                $message = "Berhasil menghapus $success_count record.";
+
+            } elseif ($bulk_action_type === 'mark_synced' && $table === 'geotags') {
+                $sql = "UPDATE `$table` SET isSynced = 1 WHERE `$pk` IN ($placeholders)";
+                $stmt = $pdo->prepare($sql);
+                $stmt->execute($selected_ids);
+                $success_count = $stmt->rowCount();
+                $pdo->commit();
+                $success = true;
+                $message = "Berhasil menandai $success_count geotag sebagai Tersinkron.";
+            } else {
+                $error = "Aksi massal tidak valid.";
+                $success = false;
+            }
+        } catch(PDOException $e) {
+            $pdo->rollBack();
+            $error = "Gagal melakukan aksi massal: " . htmlspecialchars($e->getMessage());
+            $success = false;
+        }
+
+        if ($success) {
+            header("Location: admin.php?table=$table&message=" . urlencode($message));
+            exit;
+        }
+    }
+}
+
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['create'])) {
     if (!hash_equals($_SESSION['csrf_token'], $_POST['csrf_token'] ?? '')) die('CSRF mismatch');
     
-    // Pastikan hanya bisa CREATE jika tabelnya adalah 'projects'
     if ($table !== 'projects') die('Aksi CREATE tidak diizinkan untuk tabel ini.');
     
     $fields = [];
     $placeholders = [];
     $values = [];
     
-    // Filter kolom yang dikirim dari form
     foreach ($_POST as $k => $v) {
         if (in_array($k, ['create','csrf_token', $pk])) continue;
         if (!in_array($k, ['activityName', 'locationName', 'officers', 'status'])) continue;
@@ -114,7 +275,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['create'])) {
         $values[':' . $k] = $v;
     }
     
-    // Validasi dan masukkan projectId dari form
     if (empty($_POST['projectId'])) {
          $error = 'Project ID harus diisi untuk Proyek baru.';
     } else {
@@ -152,8 +312,31 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['update'])) {
 
     $sets = [];
     $values = [];
+    
+    // --- SERVER-SIDE VALIDATION DAN LOGIC ---
+    $error = null; // Reset error for local context
+    if ($table === 'geotags') {
+        // Cek dan Validasi Lat/Lng
+        if (isset($_POST['latitude']) && !is_numeric($_POST['latitude'])) { $error = 'Latitude harus berupa angka.'; }
+        if (isset($_POST['longitude']) && !is_numeric($_POST['longitude'])) { $error = 'Longitude harus berupa angka.'; }
+        
+        // Logic Hapus Foto
+        if (isset($_POST['delete_photo']) && $_POST['delete_photo'] === '1') {
+             delete_photo_file($pdo, $table, $pk, $id, $upload_dir);
+             $_POST['photoPath'] = ''; // Paksa photoPath menjadi kosong di DB
+        }
+    }
+    if ($error !== null) { // Jika ada error validasi, hentikan proses update
+        $action = 'edit'; // Kembali ke halaman edit
+        goto render_page; // Lompat ke bagian rendering untuk menampilkan error
+    }
+    // --- AKHIR SERVER-SIDE VALIDATION DAN LOGIC ---
+
+
+    $excluded_fields = ['update','csrf_token',$pk, 'table', 'delete_photo']; 
+    
     foreach ($_POST as $k => $v) {
-        if (in_array($k, ['update','csrf_token',$pk])) continue;
+        if (in_array($k, $excluded_fields)) continue;
         
         if (in_array($k, ['created_at'])) continue;
         
@@ -165,6 +348,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['update'])) {
         $sets[] = "`" . str_replace('`','', $k) . "` = :" . $k;
         $values[':' . $k] = $v;
     }
+    
     $values[':pkval'] = $id;
     if (empty($sets)) {
         $error = 'Tidak ada perubahan.';
@@ -186,6 +370,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['delete'])) {
     $id = $_POST['id'] ?? '';
     if ($id === '') die('ID kosong');
     try {
+        // Hapus file fisik terlebih dahulu jika geotags
+        if ($table === 'geotags') {
+             delete_photo_file($pdo, $table, $pk, $id, $upload_dir);
+        }
+        
         $stmt = $pdo->prepare("DELETE FROM `$table` WHERE `$pk` = :id");
         $stmt->execute([':id' => $id]);
         header("Location: admin.php?table=$table");
@@ -202,8 +391,11 @@ if ($action !== 'login') {
     $colsMeta = $colsStmt->fetchAll(PDO::FETCH_ASSOC);
 }
 
+// Ambil pesan dari redirect (Bulk Action Success)
+$success_message = isset($_GET['message']) ? htmlspecialchars($_GET['message']) : '';
 
 // ----------------- RENDER HTML DENGAN STYLE INDEX.PHP -------------------
+render_page:
 ?><!doctype html>
 <html lang="id">
 <head>
@@ -259,19 +451,25 @@ if ($action !== 'login') {
             text-decoration: none;
             color: inherit;
         }
+        /* Style untuk Logo Image */
         .brand .logo {
             width: 56px;
             height: 56px;
             border-radius: 12px;
-            background: linear-gradient(135deg, var(--primary-color), var(--secondary-color));
-            color: #fff;
             box-shadow: 0 6px 18px rgba(46,125,50,0.15);
-            font-size: 22px;
-            font-weight: 600;
             display: inline-flex;
             align-items: center;
             justify-content: center;
+            padding: 0;
+            background: transparent;
         }
+        .brand .logo img {
+            width: 100%;
+            height: 100%;
+            object-fit: contain;
+            border-radius: 12px;
+        }
+
         .brand h1 { font-size: 20px; margin: 0; }
         .brand p { margin: 0; color: var(--muted); font-size: 13px; }
 
@@ -303,6 +501,14 @@ if ($action !== 'login') {
             padding-bottom: 10px;
             margin-bottom: 25px;
         }
+        /* Penyesuaian Judul Halaman List/Tabel */
+        .page-list-title {
+            font-size: 24px;
+            color: var(--primary-color);
+            border-bottom: 2px solid #e6e9ec;
+            padding-bottom: 10px;
+            margin-bottom: 15px; /* Kurangi margin bawah */
+        }
 
         /* Navigasi Tabel */
         .table-nav {
@@ -329,6 +535,59 @@ if ($action !== 'login') {
             background: var(--primary-color);
             color: white;
             border: 1px solid var(--primary-color);
+        }
+        
+        /* Filter Area */
+        .filter-area { 
+            display: flex; 
+            gap: 10px; 
+            margin-bottom: 12px; 
+            flex-wrap: wrap; 
+            align-items: flex-end;
+            padding: 15px;
+            border-radius: 10px;
+            background: #fff;
+            border: 1px solid #e6e9ec;
+            box-shadow: var(--shadow-subtle);
+        }
+        .filter-area .filter-group { flex: 1; min-width: 180px; }
+        .filter-area select, .filter-area input[type="text"], .filter-area input[type="date"] { 
+            padding: 8px 10px; 
+            border: 1px solid #ccc; 
+            border-radius: 6px; 
+            font-size: 14px; 
+            width: 100%; 
+        }
+        .filter-area label { font-size: 12px; color: var(--muted); font-weight: 600; margin-bottom: 4px; display: block; }
+        .filter-area button.btn-filter { padding: 9px 12px; background-color: #3498db; color: white; border: none; border-radius: 6px; cursor: pointer; font-weight: 700; transition: background-color 0.3s; }
+        .filter-area button.btn-filter:hover { background-color: #2980b9; }
+
+        /* Bulk Action Form (Diubah agar selalu di atas tabel) */
+        .bulk-actions {
+            margin-top: 10px; /* Tambahkan margin atas agar tidak terlalu dekat dengan judul */
+            margin-bottom: 15px;
+            display: flex;
+            gap: 10px;
+            align-items: center;
+            padding: 10px 0;
+            border-radius: 8px;
+            justify-content: flex-start;
+            flex-wrap: wrap;
+        }
+        .bulk-actions select { padding: 8px; border-radius: 6px; border: 1px solid #ccc; }
+        .bulk-actions button {
+            padding: 8px 12px;
+            background: #e67e22; 
+            color: white; 
+            border: none;
+            border-radius: 8px;
+            font-weight: 700;
+            cursor: pointer;
+        }
+        .bulk-actions .info {
+             font-size: 14px; 
+             color: var(--muted);
+             margin-left: 10px;
         }
 
         /* Tabel Data */
@@ -387,7 +646,7 @@ if ($action !== 'login') {
             font-weight: 600; 
             color: var(--text-dark);
         }
-        input[type="text"], textarea, select { 
+        input[type="text"], input[type="number"], textarea, select { 
             width: 100%; 
             padding: 10px; 
             margin-top: 5px; 
@@ -396,7 +655,7 @@ if ($action !== 'login') {
             font-size: 15px;
             transition: border-color 0.2s;
         }
-        input[type="text"]:focus, textarea:focus, select:focus {
+        input[type="text"]:focus, input[type="number"]:focus, textarea:focus, select:focus {
             border-color: var(--secondary-color);
             outline: none;
         }
@@ -415,6 +674,7 @@ if ($action !== 'login') {
         .btn-form-action:hover {
             background-color: var(--secondary-color);
         }
+        .success-message { background: #e8f8f3; color: #27ae60; padding: 10px; border-radius: 8px; margin-bottom: 15px; border-left: 4px solid #27ae60; }
     </style>
 </head>
 <body>
@@ -424,6 +684,9 @@ if ($action !== 'login') {
 <?php if ($action === 'login'): ?>
     <div class="form-card" style="margin: 50px auto;">
         <h2><i class="fas fa-lock"></i> Admin Login</h2>
+        <?php if (isset($_GET['timeout'])): ?>
+            <div style="color:red; margin-bottom: 10px;">Sesi telah habis karena tidak ada aktivitas (30 menit).</div>
+        <?php endif; ?>
         <p>Masukkan password untuk mengakses panel admin.</p>
         <?php if (!empty($login_error)): ?><div style="color:red; margin-bottom: 10px;"><?php echo htmlspecialchars($login_error); ?></div><?php endif; ?>
         <form method="post">
@@ -436,9 +699,16 @@ if ($action !== 'login') {
     </div>
 
 <?php else: ?>
+    <?php 
+    // Ambil semua proyek hanya saat tampilan admin tidak login
+    $all_projects = fetch_all_projects($pdo);
+    ?>
+
     <header class="app-header" role="banner">
         <div class="brand">
-            <div class="logo"><i class="fas fa-user-shield"></i></div>
+            <div class="logo" aria-hidden="true">
+                <img src="https://seedloc.my.id/logo.png" alt="SeedLoc Logo">
+            </div>
             <div>
                 <h1>Admin Panel</h1>
                 <p>Kelola Data `<?php echo htmlspecialchars($table); ?>`</p>
@@ -465,6 +735,7 @@ if ($action !== 'login') {
 
 
     <?php if (!empty($error)): ?><div style="color:red; margin-bottom: 20px;"><?php echo htmlspecialchars($error); ?></div><?php endif; ?>
+    <?php if (!empty($success_message)): ?><div class="success-message"><i class="fas fa-check-circle"></i> <?php echo $success_message; ?></div><?php endif; ?>
 
     <?php if ($action === 'create' && $table === 'projects'): ?>
         <h2 class="page-title"><i class="fas fa-plus"></i> Buat Proyek Baru</h2>
@@ -492,7 +763,7 @@ if ($action !== 'login') {
         <p style="margin-top: 20px;"><a href="admin.php?table=projects"><i class="fas fa-arrow-left"></i> Kembali ke daftar Proyek</a></p>
 
     <?php elseif ($action === 'edit'):
-        $id = $_GET['id'] ?? '';
+        $id = $_GET['id'] ?? $id; 
         $stmt = $pdo->prepare("SELECT * FROM `$table` WHERE `$pk` = :id LIMIT 1");
         $stmt->execute([':id' => $id]);
         $row = $stmt->fetch();
@@ -510,34 +781,40 @@ if ($action !== 'login') {
                 
                 <?php foreach ($colsMeta as $col): 
                     $colName = $col['Field'];
-                    $val = $row[$colName] ?? '';
+                    // Menggunakan nilai dari POST jika ada error validasi sebelumnya
+                    $val = isset($_POST[$colName]) ? $_POST[$colName] : ($row[$colName] ?? '');
+                    
                     $isPk = ($colName === $pk);
-                    // Kolom yang bersifat read-only / otomatis
                     $isReadOnly = $isPk || in_array($colName, ['created_at']);
-                    // Tentukan apakah ini kolom isSynced atau status (untuk projects)
                     $isSelect = ($colName === 'isSynced' && $table === 'geotags') || ($colName === 'status' && $table === 'projects');
+                    $isLocation = ($table === 'geotags' && in_array($colName, ['latitude', 'longitude']));
 
-                    // Lewati primary key, sudah ditangani sebagai hidden input di atas, hanya tampilkan teks
+
                     if ($isPk) {
                         echo "<label><strong>" . htmlspecialchars(ucwords(preg_replace('/(?<!^)[A-Z]/', ' $0', $colName))) . ":</strong> <span class='warning'>" . htmlspecialchars($val) . "</span></label>";
                         continue;
                     }
 
-                    // Tampilan Photo Path (hanya untuk geotags)
-                    if ($table === 'geotags' && $colName === 'photoPath' && !empty($val)): 
-                        $photo_full_url = (strpos($val, 'http') === 0) ? $val : $photo_base_url . $val;
+                    if ($table === 'geotags' && $colName === 'photoPath'): 
+                        $photo_full_url = (!empty($val) && strpos($val, 'http') === 0) ? $val : ($photo_base_url . $val);
                     ?>
                         <label>
                             Photo Path:
                             <input type="text" name="<?php echo htmlspecialchars($colName); ?>" value="<?php echo htmlspecialchars($val); ?>">
-                            <a href="<?php echo $photo_full_url; ?>" target="_blank" style="margin-top: 10px; display: inline-block;"><i class="fas fa-external-link-alt"></i> Lihat Foto</a>
-                            <img src="<?php echo $photo_full_url; ?>" alt="Foto" class="photo-thumb" style="width: 100px; height: 100px; display: block; margin-top: 10px;">
+                            
+                            <?php if (!empty($val)): ?>
+                                <a href="<?php echo $photo_full_url; ?>" target="_blank" style="margin-top: 10px; display: inline-block;"><i class="fas fa-external-link-alt"></i> Lihat Foto</a>
+                                <img src="<?php echo $photo_full_url; ?>" onerror="this.src='//via.placeholder.com/100?text=NO+IMG';" alt="Foto" class="photo-thumb" style="width: 100px; height: 100px; display: block; margin-top: 10px;">
+                                <div style="margin-top: 10px;">
+                                    <input type="checkbox" id="delete_photo" name="delete_photo" value="1" <?php echo isset($_POST['delete_photo']) ? 'checked' : ''; ?>>
+                                    <label for="delete_photo" style="display: inline; font-weight: normal; color: #e74c3c;"><i class="fas fa-trash"></i> Hapus Foto (Juga hapus file fisik di server)</label>
+                                </div>
+                            <?php endif; ?>
                         </label>
                     <?php 
                         continue;
                     endif;
 
-                    // Tampilan Select (isSynced atau status)
                     if ($isSelect):
                         $options = [];
                         if ($colName === 'isSynced') {
@@ -560,13 +837,15 @@ if ($action !== 'login') {
                         continue;
                     endif;
 
-                    // Tampilan Default
                 ?>
                     <label>
                         <?php echo htmlspecialchars(ucwords(preg_replace('/(?<!^)[A-Z]/', ' $0', $colName))); ?>:
                         <?php if ($isReadOnly): ?>
                              <input type="text" name="<?php echo htmlspecialchars($colName); ?>" value="<?php echo htmlspecialchars($val); ?>" readonly>
                              <span class="warning">(Otomatis/Tidak dapat diedit)</span>
+                        <?php elseif ($isLocation): ?>
+                             <input type="number" name="<?php echo htmlspecialchars($colName); ?>" value="<?php echo htmlspecialchars($val); ?>" step="any">
+                             <span class="warning">(Harus Angka Desimal)</span>
                         <?php elseif (strpos($col['Type'], 'text') !== false || strpos($col['Type'], 'varchar') !== false && (strlen((string)$val) > 50 || strpos($colName, 'officers') !== false || strpos($colName, 'details') !== false)): ?>
                             <textarea name="<?php echo htmlspecialchars($colName); ?>"><?php echo htmlspecialchars($val); ?></textarea>
                         <?php else: ?>
@@ -583,11 +862,80 @@ if ($action !== 'login') {
     <?php } ?>
 
     <?php else: // list view ?>
-        <h2 class="page-title"><i class="fas fa-table"></i> Daftar Data `<?php echo htmlspecialchars($table); ?>`</h2>
+        <h2 class="page-list-title"><i class="fas fa-table"></i> Daftar Data `<?php echo htmlspecialchars($table); ?>`</h2>
+        
+        <?php if ($table === 'geotags'): ?>
+        <form class="filter-area" method="GET" action="admin.php" role="search">
+            <input type="hidden" name="table" value="geotags">
+            
+            <div class="filter-group">
+                <label for="projectIdFilter">Filter Project ID</label>
+                <select name="projectId" id="projectIdFilter">
+                    <option value="all">-- Semua Project --</option>
+                    <?php foreach ($all_projects as $project): ?>
+                        <option value="<?php echo htmlspecialchars($project['projectId']); ?>" <?php echo $project_id_filter == $project['projectId'] ? 'selected' : ''; ?>>
+                            <?php echo htmlspecialchars($project['projectId'] . ' - ' . $project['activityName']); ?>
+                        </option>
+                    <?php endforeach; ?>
+                </select>
+            </div>
+            
+            <div class="filter-group">
+                <label for="searchInput">Cari Nama/Lokasi</label>
+                <input id="searchInput" type="text" name="search" placeholder="Cari Nama Pohon atau Lokasi..." value="<?php echo htmlspecialchars($search_query); ?>">
+            </div>
+
+            <div class="filter-group">
+                <label for="conditionFilter">Filter Kondisi</label>
+                <select name="condition" id="conditionFilter">
+                    <option value="all">-- Semua Kondisi --</option>
+                    <?php foreach ($conditions_list as $cond): ?>
+                        <option value="<?php echo $cond; ?>" <?php echo $condition_filter === $cond ? 'selected' : ''; ?>>
+                            <?php echo $cond; ?>
+                        </option>
+                    <?php endforeach; ?>
+                </select>
+            </div>
+
+            <div class="filter-group">
+                <label for="startDate">Mulai Tanggal</label>
+                <input type="date" name="start_date" id="startDate" value="<?php echo htmlspecialchars($start_date); ?>">
+            </div>
+            
+            <div class="filter-group">
+                <label for="endDate">Sampai Tanggal</label>
+                <input type="date" name="end_date" id="endDate" value="<?php echo htmlspecialchars($end_date); ?>">
+            </div>
+
+            <button type="submit" class="btn-filter"><i class="fas fa-filter"></i> Filter</button>
+            <?php if ($search_query || $condition_filter !== 'all' || $start_date || $end_date || $project_id_filter !== 'all'): ?>
+                <a href="admin.php?table=geotags" class="btn" title="Reset Filter" style="background: #e74c3c; color: white; font-weight: 700;"><i class="fas fa-times-circle"></i> Reset</a>
+            <?php endif; ?>
+        </form>
+        <?php endif; ?>
+
+        
+        <form id="bulkActionForm" method="post" class="bulk-actions" onsubmit="return handleBulkAction(this);">
+            <input type="hidden" name="csrf_token" value="<?php echo $_SESSION['csrf_token']; ?>">
+            
+            <select name="bulk_action_type" id="bulkActionType" required>
+                <option value="">-- Pilih Aksi Massal --</option>
+                <option value="export_selected" <?php echo $table !== 'geotags' ? 'disabled' : ''; ?>>Export ke CSV (Excel)</option>
+                <option value="delete_selected">Hapus yang Dipilih (<?php echo $table === 'geotags' ? 'Hapus Foto Fisik' : 'Hapus'; ?>)</option>
+                <?php if ($table === 'geotags'): ?>
+                    <option value="mark_synced">Tandai Tersinkron</option>
+                <?php endif; ?>
+            </select>
+            
+            <button type="submit" name="bulk_action" class="btn" style="background: #e67e22; color: white; border: none;"><i class="fas fa-tools"></i> Terapkan Aksi</button>
+
+            <div class="info">Pilih item di bawah dengan checkbox</div>
+
         <div class="data-table-container">
             <table class="data-table">
                 <thead>
                     <tr>
+                        <th><input type="checkbox" id="select_all"></th>
                         <?php
                         $cols = array_column($colsMeta, 'Field');
                         foreach ($cols as $c) echo '<th>' . htmlspecialchars(ucwords(preg_replace('/(?<!^)[A-Z]/', ' $0', $c))) . '</th>';
@@ -597,20 +945,58 @@ if ($action !== 'login') {
                 </thead>
                 <tbody>
                 <?php
-                $stmt = $pdo->query("SELECT * FROM `$table` ORDER BY `$pk` DESC LIMIT 100");
+                // --- KONTEN DATA TABEL DENGAN FILTER ---
+                $where_clauses = [];
+                $query_params = [];
+                $is_geotags = $table === 'geotags';
+
+                // Filters applied ONLY if the table is geotags
+                if ($is_geotags) {
+                    // NEW: Project ID Filter
+                    if ($project_id_filter && $project_id_filter !== 'all') {
+                        $where_clauses[] = "projectId = ?";
+                        $query_params[] = $project_id_filter;
+                    }
+
+                    if ($search_query) {
+                        $where_clauses[] = "(itemType LIKE ? OR locationName LIKE ?)";
+                        $query_params[] = "%$search_query%";
+                        $query_params[] = "%$search_query%";
+                    }
+                    if ($condition_filter && $condition_filter !== 'all') {
+                        $where_clauses[] = "`condition` = ?";
+                        $query_params[] = $condition_filter;
+                    }
+                    if ($start_date) {
+                        $where_clauses[] = "timestamp >= ?";
+                        $query_params[] = $start_date . ' 00:00:00';
+                    }
+                    if ($end_date) {
+                        $where_clauses[] = "timestamp <= ?";
+                        $query_params[] = $end_date . ' 23:59:59';
+                    }
+                }
+                
+                $where_sql = !empty($where_clauses) ? " WHERE " . implode(' AND ', $where_clauses) : "";
+                
+                $sql = "SELECT * FROM `$table` $where_sql ORDER BY `$pk` DESC LIMIT 100";
+                $stmt = $pdo->prepare($sql);
+                $stmt->execute($query_params);
+                
                 while ($r = $stmt->fetch()) {
                     echo '<tr>';
+                    // Checkbox untuk Bulk Action
+                    echo '<td><input type="checkbox" name="selected_ids[]" value="' . htmlspecialchars($r[$pk]) . '"></td>';
+                    
                     foreach ($cols as $c) {
                         $val = isset($r[$c]) ? $r[$c] : '';
                         
-                        // Display for photoPath (only for geotags)
                         if ($table === 'geotags' && $c === 'photoPath' && !empty($val)) {
                             $photo_full_url = (strpos($val, 'http') === 0) ? $val : $photo_base_url . $val;
                             echo '<td><a href="' . $photo_full_url . '" target="_blank"><img src="' . $photo_full_url . '" onerror="this.src=\'//via.placeholder.com/50?text=NO+IMG\';" alt="Foto" class="photo-thumb"></a></td>';
                             continue;
                         }
 
-                        // Display for isSynced (only for geotags)
                         if ($table === 'geotags' && $c === 'isSynced') {
                             $is_synced = (int)$val === 1;
                             $style = $is_synced ? 'color: var(--primary-color);' : 'color: #d35400; font-weight: bold;';
@@ -619,7 +1005,6 @@ if ($action !== 'login') {
                             continue;
                         }
 
-                        // Display for status (only for projects)
                         if ($table === 'projects' && $c === 'status') {
                             $is_active = $val === 'Active';
                             $style = $is_active ? 'color: var(--primary-color);' : 'color: #34495e; font-weight: bold;';
@@ -627,7 +1012,6 @@ if ($action !== 'login') {
                             continue;
                         }
                         
-                        // Default text display
                         echo '<td>' . htmlspecialchars((string)$val) . '</td>';
                     }
                     echo '<td>';
@@ -644,6 +1028,41 @@ if ($action !== 'login') {
                 </tbody>
             </table>
         </div>
+        </form> <script>
+            function handleBulkAction(form) {
+                const actionType = document.getElementById('bulkActionType').value;
+                const selectedCount = document.querySelectorAll('input[name="selected_ids[]"]:checked').length;
+                
+                if (selectedCount === 0) {
+                    alert('Pilih setidaknya satu item untuk aksi ini.');
+                    return false;
+                }
+                
+                if (actionType === 'export_selected') {
+                    // Jika aksi adalah EXPORT, ubah target form ke tab baru dan submit
+                    form.target = '_blank'; 
+                    return true; 
+                } 
+                
+                // Untuk DELETE atau SYNC
+                form.target = ''; // Kembali ke tab yang sama
+                return confirm(`Yakin ingin ${actionType.replace('_', ' ')} ${selectedCount} item yang dipilih?`);
+            }
+            
+            // Logika Select All untuk Bulk Actions
+            document.getElementById('select_all').addEventListener('change', function(e) {
+                const checkboxes = document.querySelectorAll('input[name="selected_ids[]"]');
+                for (let i = 0; i < checkboxes.length; i++) {
+                    checkboxes[i].checked = e.target.checked;
+                }
+            });
+
+            // Logika disable/enable export untuk tabel non-geotags
+            if ('<?php echo $table; ?>' !== 'geotags') {
+                document.querySelector('option[value="export_selected"]').disabled = true;
+                // document.querySelector('option[value="mark_synced"]').disabled = true; // Sudah di-handle di PHP
+            }
+        </script>
     <?php endif; ?>
 
 <?php endif; ?>
