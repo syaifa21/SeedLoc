@@ -40,9 +40,11 @@ function fetch_geotags($conn, $search_query = null, $condition_filter = null, $s
 
     // Filter Pencarian Dasar
     if ($search_query) {
-        $where[] = "(itemType LIKE ? OR locationName LIKE ?)";
+        // PERUBAHAN KRITIS: Tambahkan 'details' ke dalam kriteria pencarian.
+        $where[] = "(itemType LIKE ? OR locationName LIKE ? OR details LIKE ?)"; 
         $params[] = "%$search_query%";
         $params[] = "%$search_query%";
+        $params[] = "%$search_query%"; // Parameter ketiga untuk details
     }
     
     // Filter Kondisi
@@ -159,7 +161,7 @@ $conditions_list = ['Baik', 'Cukup', 'Buruk', 'Rusak'];
 
         #mapid { height: 560px; border-radius: 12px; margin-bottom: 18px; border: 1px solid #e6e9ec; box-shadow: var(--shadow-subtle); }
         .data-table-container { overflow: auto; max-height: 560px; border: 1px solid #e6e9ec; border-radius: 12px; box-shadow: var(--shadow-subtle); background: white; }
-        .data-table { width: 100%; border-collapse: collapse; min-width: 900px; }
+        .data-table { width: 100%; border-collapse: collapse; min-width: 1000px; } /* UBAH MIN-WIDTH UNTUK AKOMODASI DETAIL */
         .data-table th, .data-table td { padding: 14px 16px; text-align: left; border-bottom: 1px solid #f1f4f6; font-size: 14px; vertical-align: middle; }
         .data-table th { background-color: #fbfdfe; color: var(--muted); position: sticky; top: 0; z-index: 2; text-transform: uppercase; font-size: 12px; letter-spacing: 0.04em; }
         .data-table tr:hover { background: #fbfff9; cursor: pointer; }
@@ -267,8 +269,8 @@ $conditions_list = ['Baik', 'Cukup', 'Buruk', 'Rusak'];
     <form class="filter-area" method="GET" action="index.php" role="search" aria-label="Filter data geotag">
         
         <div class="search-form">
-            <label for="searchInput">Cari Nama/Lokasi</label>
-            <input id="searchInput" type="text" name="search" placeholder="Cari Nama Pohon atau Lokasi..." value="<?php echo htmlspecialchars($search_query); ?>">
+            <label for="searchInput">Cari Nama/Lokasi/Detail</label>
+            <input id="searchInput" type="text" name="search" placeholder="Cari Nama Pohon, Lokasi, atau Detail..." value="<?php echo htmlspecialchars($search_query); ?>">
         </div>
 
         <div class="date-filter">
@@ -334,6 +336,8 @@ $conditions_list = ['Baik', 'Cukup', 'Buruk', 'Rusak'];
                         <th scope="col">ID</th>
                         <th scope="col">Nama Pohon</th>
                         <th scope="col">Lokasi</th>
+                        <th scope="col" style="min-width: 150px;">Detail Penting</th>
+                        
                         <th scope="col">Koordinat (Lat, Lng)</th>
                         <th scope="col">Waktu</th>
                         <th scope="col">Kondisi</th>
@@ -343,7 +347,7 @@ $conditions_list = ['Baik', 'Cukup', 'Buruk', 'Rusak'];
                 <tbody id="data-table-body">
                     <?php if (empty($geotags)): ?>
                         <tr>
-                            <td colspan="7" style="text-align: center; color: gray; padding: 30px;">
+                            <td colspan="8" style="text-align: center; color: gray; padding: 30px;">
                                 <i class="fas fa-info-circle"></i> Tidak ada data geotag yang ditemukan.
                             </td>
                         </tr>
@@ -368,6 +372,11 @@ $conditions_list = ['Baik', 'Cukup', 'Buruk', 'Rusak'];
                             <td><?php echo $tag['id']; ?></td>
                             <td><?php echo htmlspecialchars($tag['itemType']); ?></td>
                             <td><?php echo htmlspecialchars($tag['locationName']); ?></td>
+                            
+                            <td style="max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;" title="<?php echo htmlspecialchars($tag['details']); ?>">
+                                <?php echo htmlspecialchars(substr($tag['details'], 0, 80)) . (strlen($tag['details']) > 80 ? '...' : ''); ?>
+                            </td>
+                            
                             <td><?php echo number_format($tag['latitude'], 6) . ', ' . number_format($tag['longitude'], 6); ?></td>
                             <td><?php echo $formatted_timestamp; ?></td>
                             <td><?php echo htmlspecialchars($tag['condition']); ?></td>
@@ -564,6 +573,7 @@ $conditions_list = ['Baik', 'Cukup', 'Buruk', 'Rusak'];
                         <p><strong>Koordinat:</strong> ${lat.toFixed(6)}, ${lng.toFixed(6)}</p>
                         <p><strong>Kondisi:</strong> <span style="font-weight:600;color:#2980b9;">${escapeHtml(geotag.condition || '-')}</span></p>
                         <p><strong>Waktu:</strong> <i class="far fa-clock"></i> ${formattedTime}</p>
+                        <p><strong>Detail:</strong> ${escapeHtml(geotag.details || '-')}</p>
                         <hr style="margin:8px 0;">
                         ${photoUrl ? `<a href="javascript:void(0)" onclick="openModal('${escapeHtml(photoUrl)}', '${escapeHtml(geotag.itemType)}', '${escapeHtml(geotag.locationName)}')" style="color: var(--secondary-color); font-weight:700;"><i class="fas fa-camera"></i> Lihat Foto</a>` : 'Tidak ada Foto'}
                     </div>
