@@ -1,0 +1,20 @@
+NOTA BELANJA
+Toko "SEJAHTERA ABADI"
+------------------------------------------------
+Tanggal : 25 Nov 2025
+
+No | Nama Barang           | Qty | Harga Sat | Jumlah
+---|-----------------------|-----|-----------|----------
+1  | Sewa Terpal/Tenda     | 1   | 200.000   | 200.000
+2  | Kantong Sampah Besar  | 5   | 20.000    | 100.000
+3  | Sarung Tangan Kerja   | 4   | 15.000    | 60.000
+4  | Tali Rafia/Tambang    | 2   | 20.000    | 40.000
+5  | Perlengkapan Lainnya  | 1   | 100.000   | 100.000
+---|-----------------------|-----|-----------|----------
+   |                       |     | TOTAL     | Rp 500.000
+   |                       |     |           | ==========
+Hormat Kami,
+
+
+
+Zaka

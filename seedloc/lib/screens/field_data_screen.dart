@@ -27,7 +27,7 @@ class _FieldDataScreenState extends State<FieldDataScreen> {
 
   // BARU: State dan List untuk Dropdown Jenis Pohon
   String _itemType = 'Saninten (Castanopsis argentea)'; 
-  final List<String> _treeTypes = ['Saninten (Castanopsis argentea)', 'Puspa (Schima wallichii)', 'Manglid (Manglietia glauca )']; 
+  final List<String> _treeTypes = ['Saninten (Castanopsis argentea)', 'Puspa (Schima wallichii)', 'Manglid (Manglietia glauca )', 'Pangsor (Ficus Callosa)','Picung (Pangium edule) ','Salam (Syzygium polyantum) ','Parengpeng (Croton argyratus) ','Beringin (Ficus benjamina) ','Ki Teja (Cinnamomum iners) ','Peutag (Accemena accuminatissina) ','Ki Hujan (Samanera saman) ', 'Saga (Abrus precatorius) ','Huru Dapung (Actinodphne glomenata) ',]; 
 
   String _condition = 'Baik';
   String? _photoPath;
