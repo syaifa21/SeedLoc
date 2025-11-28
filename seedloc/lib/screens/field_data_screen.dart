@@ -22,28 +22,84 @@ class FieldDataScreen extends StatefulWidget {
 class _FieldDataScreenState extends State<FieldDataScreen> {
   final _formKey = GlobalKey<FormState>();
   final TextEditingController _detailsController = TextEditingController();
-  // DIHAPUS: final TextEditingController _itemTypeController = TextEditingController(); 
-  final TextEditingController _locationNameInputController = TextEditingController();
+  // DIHAPUS: final TextEditingController _locationNameInputController = TextEditingController();
 
-  // BARU: State dan List untuk Dropdown Jenis Pohon
-  String _itemType = 'Saninten (Castanopsis argentea)'; 
-  final List<String> _treeTypes = ['Saninten (Castanopsis argentea)', 'Puspa (Schima wallichii)', 'Manglid (Manglietia glauca )', 'Pangsor (Ficus Callosa)','Picung (Pangium edule) ','Salam (Syzygium polyantum) ','Parengpeng (Croton argyratus) ','Beringin (Ficus benjamina) ','Ki Teja (Cinnamomum iners) ','Peutag (Accemena accuminatissina) ','Ki Hujan (Samanera saman) ', 'Saga (Abrus precatorius) ','Huru Dapung (Actinodphne glomenata) ',]; 
+  // LIST LOKASI (Ditambahkan 'Lainnya' yang typo diperbaiki)
+  final List<String> _locations = [
+    'Sayangkaak',
+    'Simpangangin',
+    'K2',
+    'K5',
+    'Batu Ngadapang',
+    'Lainnya'
+  ];
+  String _selectedLocation = 'Sayangkaak'; // Default value
+
+  // State dan List untuk Dropdown Jenis Pohon
+  String _itemType = 'Saninten (Castanopsis argentea)';
+  final List<String> _treeTypes = [
+    'Saninten (Castanopsis argentea)',
+    'Kuray (Trema orientalis)',
+    'Kondang (Ficus variegata)',
+    'Nangsi (Oreocnide rubescens)',
+    'Pingku (Dysoxylum ramiflorum)',
+    'Manglid (Magnolia blumei)',
+    'Puspa (Schima wallichii)',
+    'Pasang (Lithocarpus sp)',
+    'Darangdan (Ficus melinocarpa)',
+    'Simpur (Dillenia obovata)',
+    'Kemiri (Aleurites sp)',
+    'Picung/Kluwek (Pangium edule)',
+    'Huru-huruan (Litsea sp)',
+    'Beunying (Ficus fistulosa)',
+    'Lame/Pulai (Alstonia scholaris)',
+    'Mara (Macaranga tanarius)',
+    'Hamberang (Ficus fulva)',
+    'Kiteja (Cinnamomum iners)',
+    'Walen (Ficus ribes)',
+    'Peutag (Acemena acuminatissima)',
+    'Hantap (Sterculia oblongata)',
+    'Benda (Arthocarpus elasticus)',
+    'Kedoya (Dysoxylum gaudichaudianum)',
+    'Kileho (Saurauia pendula)',
+    'Kopo (Syzygium pycnanthum)',
+    'Kimuncang (Croton argyratus)',
+    'Cangcaratan (Neonauclea sp)',
+    'Salam (Syzygium polyanthum)',
+    'Ki Lampet (Wenlandia junghuhniana)',
+    'Kawoyang (Prunus grisea)',
+    'Kareumbi (Homalanthus populnes)',
+    'Kosambi (Schleichera oleosa)',
+    'Masawa (Anisoptera costata)',
+    'Huru Dapung (Actinodaphne glomerata)',
+    'Petai (Parkia speciosa)',
+    'Jengkol (Archidendron pauciflorum)',
+    'Bingbin (Pinanga coronata)',
+    'Aren (Arenga pinnata)',
+    'Jamuju (Podocarpus imbricatus)',
+    'Ganitri (Eleaocarpus ganitrus)',
+    'Ki Beusi (Dodonaea viscosa)',
+    'Huru dadap (Erythrina fusca)',
+    'Hanjawar (Caryota mitis)',
+    'Lainnya'
+  ];
 
   String _condition = 'Baik';
+  final List<String> _conditions = ['Hidup', 'Merana', 'Mati'];
+
   String? _photoPath;
   bool _isCapturingLocation = false;
   double _progress = 0.0;
   String _accuracyText = 'Akurasi: -- m';
   String _currentLocationText = 'Lokasi Terkini: --';
   Position? _averagedPosition;
-  
-  String _locationNameStatus = 'Akurasi Final: --'; 
+
+  String _locationNameStatus = 'Akurasi Final: --';
   String _samplesInfo = 'Sampel: 0';
 
   Timer? _timer;
   Timer? _uiUpdateTimer;
-
-  final List<String> _conditions = ['Baik', 'Cukup', 'Buruk', 'Rusak'];
+  
   final BackgroundLocationService _bgLocationService = BackgroundLocationService();
 
   @override
@@ -57,13 +113,11 @@ class _FieldDataScreenState extends State<FieldDataScreen> {
     _timer?.cancel();
     _uiUpdateTimer?.cancel();
     _detailsController.dispose();
-    // DIHAPUS: _itemTypeController.dispose(); 
-    _locationNameInputController.dispose(); 
+    // DIHAPUS: _locationNameInputController.dispose();
     super.dispose();
   }
 
   void _startUIUpdates() {
-    // Update UI every second with background service data
     _uiUpdateTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
       if (!mounted) return;
 
@@ -72,9 +126,12 @@ class _FieldDataScreenState extends State<FieldDataScreen> {
 
       setState(() {
         if (currentPos != null) {
-          _accuracyText = 'Akurasi: ${currentPos.accuracy.toStringAsFixed(1)} m';
-          _currentLocationText = 'Lat: ${currentPos.latitude.toStringAsFixed(6)}, Lng: ${currentPos.longitude.toStringAsFixed(6)}';
-          _samplesInfo = 'Sampel: ${stats['totalSamples']} | Terbaik: ${stats['bestAccuracy'].toStringAsFixed(1)}m';
+          _accuracyText =
+              'Akurasi: ${currentPos.accuracy.toStringAsFixed(1)} m';
+          _currentLocationText =
+              'Lat: ${currentPos.latitude.toStringAsFixed(6)}, Lng: ${currentPos.longitude.toStringAsFixed(6)}';
+          _samplesInfo =
+              'Sampel: ${stats['totalSamples']} | Terbaik: ${stats['bestAccuracy'].toStringAsFixed(1)}m';
         }
       });
     });
@@ -106,7 +163,6 @@ class _FieldDataScreenState extends State<FieldDataScreen> {
     int sampleCount = 0;
 
     try {
-      // Ambil sampel GPS setiap 1 detik
       _timer = Timer.periodic(const Duration(seconds: 1), (timer) async {
         try {
           Position position = await LocationService.getCurrentPosition();
@@ -117,19 +173,19 @@ class _FieldDataScreenState extends State<FieldDataScreen> {
             setState(() {
               _progress = sampleCount / maxSamples;
               _samplesInfo = 'Sampel: $sampleCount/$maxSamples';
-              _accuracyText = 'Akurasi: ${position.accuracy.toStringAsFixed(1)} m';
-              _currentLocationText = 'Lat: ${position.latitude.toStringAsFixed(6)}, Lng: ${position.longitude.toStringAsFixed(6)}';
+              _accuracyText =
+                  'Akurasi: ${position.accuracy.toStringAsFixed(1)} m';
+              _currentLocationText =
+                  'Lat: ${position.latitude.toStringAsFixed(6)}, Lng: ${position.longitude.toStringAsFixed(6)}';
             });
           }
 
-          // Jika dapat akurasi < 5m, langsung selesai!
           if (position.accuracy < 5.0) {
             timer.cancel();
             await _finishCapture(samples, sampleCount);
             return;
           }
 
-          // Atau jika sudah 5 sampel, selesai
           if (sampleCount >= maxSamples) {
             timer.cancel();
             await _finishCapture(samples, sampleCount);
@@ -160,7 +216,6 @@ class _FieldDataScreenState extends State<FieldDataScreen> {
       return;
     }
 
-    // Remove outliers dan hitung weighted average
     List<Position> filtered = _removeOutliers(samples);
     Position averaged = _calculateWeightedAverage(filtered);
 
@@ -168,17 +223,15 @@ class _FieldDataScreenState extends State<FieldDataScreen> {
       _averagedPosition = averaged;
       _isCapturingLocation = false;
       _progress = 1.0;
-      // Update status dengan akurasi final yang didapat
-      _locationNameStatus = 'Akurasi Final: ${averaged.accuracy.toStringAsFixed(1)} m'; 
+      _locationNameStatus =
+          'Akurasi Final: ${averaged.accuracy.toStringAsFixed(1)} m';
     });
 
-    // Show success message
     if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(
-            'Lokasi ditangkap! Akurasi: ${averaged.accuracy.toStringAsFixed(1)}m (dari $sampleCount sampel)'
-          ),
+              'Lokasi ditangkap! Akurasi: ${averaged.accuracy.toStringAsFixed(1)}m (dari $sampleCount sampel)'),
           backgroundColor: Colors.green,
           duration: const Duration(seconds: 3),
         ),
@@ -186,10 +239,9 @@ class _FieldDataScreenState extends State<FieldDataScreen> {
     }
   }
 
-  // Remove outliers using Interquartile Range (IQR) method
   List<Position> _removeOutliers(List<Position> positions) {
     if (positions.length < 4) {
-      return positions; 
+      return positions;
     }
 
     List<double> latitudes = positions.map((p) => p.latitude).toList()..sort();
@@ -205,8 +257,10 @@ class _FieldDataScreenState extends State<FieldDataScreen> {
     }).toList();
 
     List<double> sortedDistances = List.from(distances)..sort();
-    double q1 = _calculateMedian(sortedDistances.sublist(0, sortedDistances.length ~/ 2));
-    double q3 = _calculateMedian(sortedDistances.sublist(sortedDistances.length ~/ 2));
+    double q1 =
+        _calculateMedian(sortedDistances.sublist(0, sortedDistances.length ~/ 2));
+    double q3 =
+        _calculateMedian(sortedDistances.sublist(sortedDistances.length ~/ 2));
     double iqr = q3 - q1;
     double threshold = q3 + 1.5 * iqr;
 
@@ -230,7 +284,6 @@ class _FieldDataScreenState extends State<FieldDataScreen> {
     }
   }
 
-  // Calculate weighted average based on accuracy (better accuracy = higher weight)
   Position _calculateWeightedAverage(List<Position> positions) {
     if (positions.isEmpty) {
       throw Exception('No positions to average');
@@ -255,10 +308,11 @@ class _FieldDataScreenState extends State<FieldDataScreen> {
 
     double avgLat = weightedLat / totalWeight;
     double avgLng = weightedLng / totalWeight;
-    
-    double bestAccuracy = positions.map((p) => p.accuracy).reduce((a, b) => a < b ? a : b);
+
+    double bestAccuracy =
+        positions.map((p) => p.accuracy).reduce((a, b) => a < b ? a : b);
     double avgAccuracy = totalAccuracy / positions.length;
-    
+
     double finalAccuracy = (bestAccuracy * 0.7 + avgAccuracy * 0.3);
 
     return Position(
@@ -275,56 +329,51 @@ class _FieldDataScreenState extends State<FieldDataScreen> {
     );
   }
 
-  // FUNGSI WATERMARK DENGAN INPUT LOKASI MANUAL
   String _buildGeotagWatermarkInfo() {
     final DateTime now = DateTime.now();
-    final String formattedDate = '${now.day}/${now.month}/${now.year} ${now.hour}:${now.minute.toString().padLeft(2, '0')}:${now.second.toString().padLeft(2, '0')}';
-    
-    return 'Lokasi: ${_locationNameInputController.text}\n'
-           'Koordinat: ${_averagedPosition!.latitude.toStringAsFixed(6)}, ${_averagedPosition!.longitude.toStringAsFixed(6)}\n'
-           'Akurasi: ${_averagedPosition!.accuracy.toStringAsFixed(1)} m\n'
-           'Waktu: $formattedDate\n'
-           'Tipe Item: $_itemType\n' // MENGGUNAKAN STATE BARU
-           'Kondisi: $_condition\n'
-           'Detail: ${_detailsController.text}'; 
+    final String formattedDate =
+        '${now.day}/${now.month}/${now.year} ${now.hour}:${now.minute.toString().padLeft(2, '0')}:${now.second.toString().padLeft(2, '0')}';
+
+    // MENGGUNAKAN SELECTED LOCATION DARI DROPDOWN
+    return 'Lokasi: $_selectedLocation\n'
+        'Koordinat: ${_averagedPosition!.latitude.toStringAsFixed(6)}, ${_averagedPosition!.longitude.toStringAsFixed(6)}\n'
+        'Akurasi: ${_averagedPosition!.accuracy.toStringAsFixed(1)} m\n'
+        'Waktu: $formattedDate\n'
+        'Tipe Item: $_itemType\n'
+        'Kondisi: $_condition\n'
+        'Detail: ${_detailsController.text}';
   }
 
-  // FUNGSI BARU UNTUK NAMA FILE
   String _buildPhotoFileName() {
     final DateTime now = DateTime.now();
-    // Format YYYYMMDD_HHMMSS
-    final String formattedDateTime = '${now.year}${now.month.toString().padLeft(2, '0')}${now.day.toString().padLeft(2, '0')}_'
-                                     '${now.hour.toString().padLeft(2, '0')}${now.minute.toString().padLeft(2, '0')}${now.second.toString().padLeft(2, '0')}';
-    
-    // Menghilangkan spasi dan karakter non-alphanumeric dari nama
-    final String safeItemType = _itemType.replaceAll(RegExp(r'[^a-zA-Z0-9_]'), '_'); // MENGGUNAKAN STATE BARU
-    final String safeCondition = _condition.replaceAll(RegExp(r'[^a-zA-Z0-9_]'), '_');
-    
-    // Format Final: NamaPohon_Kondisi_YYYYMMDD_HHMMSS
-    return '${safeItemType}_${safeCondition}_$formattedDateTime'; 
+    final String formattedDateTime =
+        '${now.year}${now.month.toString().padLeft(2, '0')}${now.day.toString().padLeft(2, '0')}_'
+        '${now.hour.toString().padLeft(2, '0')}${now.minute.toString().padLeft(2, '0')}${now.second.toString().padLeft(2, '0')}';
+
+    final String safeItemType =
+        _itemType.replaceAll(RegExp(r'[^a-zA-Z0-9_]'), '_');
+    final String safeCondition =
+        _condition.replaceAll(RegExp(r'[^a-zA-Z0-9_]'), '_');
+
+    return '${safeItemType}_${safeCondition}_$formattedDateTime';
   }
 
   Future<void> _takePhoto() async {
-    // Pastikan lokasi sudah diambil sebelum mengambil foto
     if (_averagedPosition == null) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Harap tangkap lokasi terlebih dahulu')),
       );
       return;
     }
-    
-    // 1. Siapkan teks Watermark
+
     final String geotagInfo = _buildGeotagWatermarkInfo();
-    // 2. Siapkan NAMA FILE BARU
     final String customFileName = _buildPhotoFileName();
-    
-    // 3. Ambil dan Stamp Foto
+
     String? photoPath = await ImageService.pickImage(
-      geotagInfo: geotagInfo, 
-      customFileName: customFileName, 
-      tempPath: 'unused_path' 
-    );
-    
+        geotagInfo: geotagInfo,
+        customFileName: customFileName,
+        tempPath: 'unused_path');
+
     if (photoPath != null) {
       setState(() {
         _photoPath = photoPath;
@@ -333,18 +382,20 @@ class _FieldDataScreenState extends State<FieldDataScreen> {
   }
 
   Future<void> _saveGeotag() async {
-    // Tambahkan validasi untuk controller lokasi manual
     if (!_formKey.currentState!.validate() || _averagedPosition == null) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Harap lengkapi semua kolom dan tangkap lokasi')),
+        const SnackBar(
+            content: Text('Harap lengkapi semua kolom dan tangkap lokasi')),
       );
       return;
     }
 
-    // Check if accuracy is within required range (1-5 meters)
-    if (_averagedPosition!.accuracy < 1.0 || _averagedPosition!.accuracy > 5.0) {
+    if (_averagedPosition!.accuracy < 1.0 ||
+        _averagedPosition!.accuracy > 5.0) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Akurasi lokasi tidak memenuhi syarat (harus 1-5 meter)')),
+        const SnackBar(
+            content: Text(
+                'Akurasi lokasi tidak memenuhi syarat (harus 1-5 meter)')),
       );
       return;
     }
@@ -355,13 +406,13 @@ class _FieldDataScreenState extends State<FieldDataScreen> {
       projectId: widget.projectId,
       latitude: _averagedPosition!.latitude,
       longitude: _averagedPosition!.longitude,
-      // MENGGUNAKAN INPUT MANUAL
-      locationName: _locationNameInputController.text, 
+      // MENGGUNAKAN VALUE DARI DROPDOWN
+      locationName: _selectedLocation,
       timestamp: DateTime.now().toIso8601String(),
-      itemType: _itemType, // MENGGUNAKAN STATE BARU
+      itemType: _itemType,
       condition: _condition,
       details: _detailsController.text,
-      photoPath: _photoPath ?? '', 
+      photoPath: _photoPath ?? '',
       deviceId: deviceId,
     );
 
@@ -372,9 +423,8 @@ class _FieldDataScreenState extends State<FieldDataScreen> {
       const SnackBar(content: Text('Geotag berhasil disimpan')),
     );
 
-    // Navigate back to GeotagListScreen and refresh data
     if (mounted) {
-      Navigator.of(context).pop(true); 
+      Navigator.of(context).pop(true);
     }
   }
 
@@ -382,14 +432,15 @@ class _FieldDataScreenState extends State<FieldDataScreen> {
     setState(() {
       _averagedPosition = null;
       _photoPath = null;
-      _locationNameStatus = 'Akurasi Final: --'; // Reset status
+      _locationNameStatus = 'Akurasi Final: --';
       _accuracyText = 'Akurasi: -- m';
       _currentLocationText = 'Lokasi Terkini: --';
       _progress = 0.0;
-      _itemType = 'Pohon 1'; // Reset item type
+      _itemType = _treeTypes[0]; 
+      _selectedLocation = _locations[0]; // Reset lokasi ke awal
     });
     _detailsController.clear();
-    _locationNameInputController.clear(); // NEW: Bersihkan input manual
+    // DIHAPUS: _locationNameInputController.clear();
   }
 
   @override
@@ -415,12 +466,17 @@ class _FieldDataScreenState extends State<FieldDataScreen> {
                         children: [
                           const Icon(Icons.location_on, color: Colors.blue),
                           const SizedBox(width: 8),
-                          const Text('Penangkapan Lokasi', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+                          const Text('Penangkapan Lokasi',
+                              style: TextStyle(
+                                  fontSize: 18, fontWeight: FontWeight.bold)),
                           const Spacer(),
                           Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 8, vertical: 4),
                             decoration: BoxDecoration(
-                              color: _bgLocationService.isTracking ? Colors.green.shade100 : Colors.grey.shade200,
+                              color: _bgLocationService.isTracking
+                                  ? Colors.green.shade100
+                                  : Colors.grey.shade200,
                               borderRadius: BorderRadius.circular(12),
                             ),
                             child: Row(
@@ -428,15 +484,21 @@ class _FieldDataScreenState extends State<FieldDataScreen> {
                                 Icon(
                                   Icons.circle,
                                   size: 8,
-                                  color: _bgLocationService.isTracking ? Colors.green : Colors.grey,
+                                  color: _bgLocationService.isTracking
+                                      ? Colors.green
+                                      : Colors.grey,
                                 ),
                                 const SizedBox(width: 4),
                                 Text(
-                                  _bgLocationService.isTracking ? 'Live' : 'Off',
+                                  _bgLocationService.isTracking
+                                      ? 'Live'
+                                      : 'Off',
                                   style: TextStyle(
                                     fontSize: 10,
                                     fontWeight: FontWeight.bold,
-                                    color: _bgLocationService.isTracking ? Colors.green : Colors.grey,
+                                    color: _bgLocationService.isTracking
+                                        ? Colors.green
+                                        : Colors.grey,
                                   ),
                                 ),
                               ],
@@ -445,7 +507,8 @@ class _FieldDataScreenState extends State<FieldDataScreen> {
                         ],
                       ),
                       const SizedBox(height: 10),
-                      if (_progress > 0) LinearProgressIndicator(value: _progress),
+                      if (_progress > 0)
+                        LinearProgressIndicator(value: _progress),
                       const SizedBox(height: 10),
                       Container(
                         padding: const EdgeInsets.all(12),
@@ -458,18 +521,28 @@ class _FieldDataScreenState extends State<FieldDataScreen> {
                           children: [
                             Row(
                               children: [
-                                const Icon(Icons.info_outline, size: 16, color: Colors.blue),
+                                const Icon(Icons.info_outline,
+                                    size: 16, color: Colors.blue),
                                 const SizedBox(width: 4),
-                                const Text('Status Real-time', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12)),
+                                const Text('Status Real-time',
+                                    style: TextStyle(
+                                        fontWeight: FontWeight.bold,
+                                        fontSize: 12)),
                               ],
                             ),
                             const SizedBox(height: 8),
-                            Text(_accuracyText, style: const TextStyle(fontSize: 12)),
-                            Text(_currentLocationText, style: const TextStyle(fontSize: 12)),
-                            Text(_samplesInfo, style: const TextStyle(fontSize: 12)),
-                            // Menampilkan status akurasi final setelah penangkapan
+                            Text(_accuracyText,
+                                style: const TextStyle(fontSize: 12)),
+                            Text(_currentLocationText,
+                                style: const TextStyle(fontSize: 12)),
+                            Text(_samplesInfo,
+                                style: const TextStyle(fontSize: 12)),
                             if (_averagedPosition != null)
-                              Text(_locationNameStatus, style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Colors.green)),
+                              Text(_locationNameStatus,
+                                  style: const TextStyle(
+                                      fontSize: 12,
+                                      fontWeight: FontWeight.bold,
+                                      color: Colors.green)),
                           ],
                         ),
                       ),
@@ -477,9 +550,15 @@ class _FieldDataScreenState extends State<FieldDataScreen> {
                       SizedBox(
                         width: double.infinity,
                         child: ElevatedButton.icon(
-                          onPressed: _isCapturingLocation ? null : _captureLocation,
-                          icon: Icon(_isCapturingLocation ? Icons.hourglass_empty : Icons.my_location),
-                          label: Text(_isCapturingLocation ? 'Memproses...' : 'Gunakan Lokasi Terkini'),
+                          onPressed: _isCapturingLocation
+                              ? null
+                              : _captureLocation,
+                          icon: Icon(_isCapturingLocation
+                              ? Icons.hourglass_empty
+                              : Icons.my_location),
+                          label: Text(_isCapturingLocation
+                              ? 'Memproses...'
+                              : 'Gunakan Lokasi Terkini'),
                           style: ElevatedButton.styleFrom(
                             padding: const EdgeInsets.symmetric(vertical: 12),
                             backgroundColor: Colors.blue,
@@ -500,40 +579,63 @@ class _FieldDataScreenState extends State<FieldDataScreen> {
                   padding: const EdgeInsets.all(16.0),
                   child: Column(
                     children: [
-                      const Text('Input Data', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
-                      const SizedBox(height: 10),
-                      
-                      // NEW: Location Name Input Field
-                      TextFormField(
-                        controller: _locationNameInputController,
-                        decoration: const InputDecoration(labelText: 'Nama Lokasi (Wajib Diisi)'),
-                        validator: (value) =>
-                            value!.isEmpty ? 'Harap masukkan nama lokasi' : null,
-                      ),
+                      const Text('Input Data',
+                          style: TextStyle(
+                              fontSize: 18, fontWeight: FontWeight.bold)),
                       const SizedBox(height: 10),
 
-                      // NEW: Item Type Dropdown
+                      // UBAH: Dropdown Lokasi (Gantikan TextFormField)
                       DropdownButtonFormField<String>(
-                        value: _itemType, 
-                        decoration: const InputDecoration(labelText: 'Jenis Pohon'),
-                        items: _treeTypes.map((treeType) {
-                          return DropdownMenuItem(value: treeType, child: Text(treeType));
+                        value: _selectedLocation,
+                        decoration:
+                            const InputDecoration(labelText: 'Nama Lokasi'),
+                        items: _locations.map((loc) {
+                          return DropdownMenuItem(
+                            value: loc,
+                            child: Text(loc),
+                          );
                         }).toList(),
-                        onChanged: (value) => setState(() => _itemType = value!),
-                        validator: (value) => value == null ? 'Harap pilih jenis pohon' : null,
+                        onChanged: (value) =>
+                            setState(() => _selectedLocation = value!),
+                        validator: (value) => value == null
+                            ? 'Harap pilih lokasi'
+                            : null,
                       ),
-                      
+
+                      const SizedBox(height: 10),
+
+                      // Item Type Dropdown
+                      DropdownButtonFormField<String>(
+                        value: _itemType,
+                        decoration:
+                            const InputDecoration(labelText: 'Jenis Pohon'),
+                        items: _treeTypes.map((treeType) {
+                          return DropdownMenuItem(
+                              value: treeType, child: Text(treeType));
+                        }).toList(),
+                        onChanged: (value) =>
+                            setState(() => _itemType = value!),
+                        validator: (value) => value == null
+                            ? 'Harap pilih jenis pohon'
+                            : null,
+                      ),
+
                       const SizedBox(height: 10),
 
                       // Condition Dropdown
                       DropdownButtonFormField<String>(
                         value: _condition,
-                        decoration: const InputDecoration(labelText: 'Kondisi'),
+                        decoration:
+                            const InputDecoration(labelText: 'Kondisi'),
                         items: _conditions.map((condition) {
-                          return DropdownMenuItem(value: condition, child: Text(condition));
+                          return DropdownMenuItem(
+                              value: condition, child: Text(condition));
                         }).toList(),
-                        onChanged: (value) => setState(() => _condition = value!),
-                        validator: (value) => value == null ? 'Harap pilih kondisi' : null,
+                        onChanged: (value) =>
+                            setState(() => _condition = value!),
+                        validator: (value) => value == null
+                            ? 'Harap pilih kondisi'
+                            : null,
                       ),
 
                       const SizedBox(height: 10),
@@ -543,7 +645,8 @@ class _FieldDataScreenState extends State<FieldDataScreen> {
                         controller: _detailsController,
                         decoration: const InputDecoration(labelText: 'Detail'),
                         maxLines: 3,
-                        validator: (value) => value!.isEmpty ? 'Harap masukkan detail' : null,
+                        validator: (value) =>
+                            value!.isEmpty ? 'Harap masukkan detail' : null,
                       ),
 
                       const SizedBox(height: 10),
@@ -558,7 +661,8 @@ class _FieldDataScreenState extends State<FieldDataScreen> {
                       if (_photoPath != null)
                         Padding(
                           padding: const EdgeInsets.only(top: 10),
-                          child: Text('Foto diambil: ${_photoPath!.split('/').last}'),
+                          child: Text(
+                              'Foto diambil: ${_photoPath!.split('/').last}'),
                         ),
                     ],
                   ),
@@ -575,7 +679,8 @@ class _FieldDataScreenState extends State<FieldDataScreen> {
                   style: ElevatedButton.styleFrom(
                     padding: const EdgeInsets.symmetric(vertical: 16),
                   ),
-                  child: const Text('Simpan Geotag', style: TextStyle(fontSize: 18)),
+                  child: const Text('Simpan Geotag',
+                      style: TextStyle(fontSize: 18)),
                 ),
               ),
             ],

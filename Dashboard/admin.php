@@ -1,5 +1,5 @@
 <?php
-// admin.php - Final Version (Gallery Pop-up Added)
+// admin.php - Updated with Dropdowns for ItemType & Location
 
 session_start();
 
@@ -21,7 +21,28 @@ try {
     die("Database Error: " . htmlspecialchars($e->getMessage()));
 }
 
-// --- 2. FUNGSI BANTUAN ---
+// --- 2. DATA LISTS (Sinkron dengan Flutter) ---
+$tree_types = [
+    'Saninten (Castanopsis argentea)', 'Kuray (Trema orientalis)', 'Kondang (Ficus variegata)', 
+    'Nangsi (Oreocnide rubescens)', 'Pingku (Dysoxylum ramiflorum)', 'Manglid (Magnolia blumei)', 
+    'Puspa (Schima wallichii)', 'Pasang (Lithocarpus sp)', 'Darangdan (Ficus melinocarpa)', 
+    'Simpur (Dillenia obovata)', 'Kemiri (Aleurites sp)', 'Picung/Kluwek (Pangium edule)', 
+    'Huru-huruan (Litsea sp)', 'Beunying (Ficus fistulosa)', 'Lame/Pulai (Alstonia scholaris)', 
+    'Mara (Macaranga tanarius)', 'Hamberang (Ficus fulva)', 'Kiteja (Cinnamomum iners)', 
+    'Walen (Ficus ribes)', 'Peutag (Acemena acuminatissima)', 'Hantap (Sterculia oblongata)', 
+    'Benda (Arthocarpus elasticus)', 'Kedoya (Dysoxylum gaudichaudianum)', 'Kileho (Saurauia pendula)', 
+    'Kopo (Syzygium pycnanthum)', 'Kimuncang (Croton argyratus)', 'Cangcaratan (Neonauclea sp)', 
+    'Salam (Syzygium polyanthum)', 'Ki Lampet (Wenlandia junghuhniana)', 'Kawoyang (Prunus grisea)', 
+    'Kareumbi (Homalanthus populnes)', 'Kosambi (Schleichera oleosa)', 'Masawa (Anisoptera costata)', 
+    'Huru Dapung (Actinodaphne glomerata)', 'Petai (Parkia speciosa)', 'Jengkol (Archidendron pauciflorum)', 
+    'Bingbin (Pinanga coronata)', 'Aren (Arenga pinnata)', 'Jamuju (Podocarpus imbricatus)', 
+    'Ganitri (Eleaocarpus ganitrus)', 'Ki Beusi (Dodonaea viscosa)', 'Huru dadap (Erythrina fusca)', 
+    'Hanjawar (Caryota mitis)', 'Lainnya'
+];
+
+$locations_list = ['Sayangkaak', 'Simpangangin', 'K2', 'K5', 'Batu Ngadapang', 'Lainnya'];
+
+// --- 3. FUNGSI BANTUAN ---
 function log_activity($pdo, $action, $table, $details) {
     if (!isset($_SESSION['admin_username'])) return;
     $stmt = $pdo->prepare("INSERT INTO activity_logs (admin_username, action, target_table, details, ip_address) VALUES (?, ?, ?, ?, ?)");
@@ -65,7 +86,7 @@ function export_data($pdo, $ids, $type, $base_url) {
     exit;
 }
 
-// --- 3. AUTHENTICATION ---
+// --- 4. AUTHENTICATION ---
 $session_timeout = 3600; 
 if (isset($_SESSION['auth']) && $_SESSION['auth'] === true) {
     if (isset($_SESSION['auth_time']) && (time() - $_SESSION['auth_time'] > $session_timeout)) {
@@ -76,7 +97,7 @@ if (isset($_SESSION['auth']) && $_SESSION['auth'] === true) {
 if (!isset($_SESSION['csrf_token'])) $_SESSION['csrf_token'] = bin2hex(random_bytes(16));
 function require_auth() { if (!isset($_SESSION['auth']) || !$_SESSION['auth']) { header('Location: ?action=login'); exit; } }
 
-// --- 4. CONTROLLER LOGIC ---
+// --- 5. CONTROLLER LOGIC ---
 $action = $_GET['action'] ?? 'dashboard';
 $table = $_GET['table'] ?? 'geotags';
 $pk = ($table === 'projects') ? 'projectId' : 'id';
@@ -172,7 +193,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['csrf_token'])) {
     }
 }
 
-// --- 5. DATA FETCHING ---
+// --- 6. DATA FETCHING ---
 $stats = [];
 if ($action === 'dashboard') {
     $stats['geotags'] = $pdo->query("SELECT COUNT(*) FROM geotags")->fetchColumn();
@@ -359,11 +380,23 @@ if (in_array($action, ['list', 'gallery', 'map', 'logs', 'users'])) {
         
             <div style="overflow-x:auto; margin-top:10px;">
                 <table>
-                <thead><tr><th width="30">#</th><?php if($table=='geotags'): ?><th>Foto</th><th>ID</th><th>Tipe</th><th>Lokasi</th><th>Kondisi</th><?php else: ?><th>ID</th><th>Nama</th><th>Status</th><?php endif; ?><th>Aksi</th></tr></thead>
+                <thead>
+                    <tr>
+                        <th width="30"><input type="checkbox" onclick="toggle(this)"></th>
+                        
+                        <?php if($table=='geotags'): ?>
+                            <th>Foto</th><th>ID</th><th>Tipe</th><th>Lokasi</th><th>Kondisi</th>
+                        <?php else: ?>
+                            <th>ID</th><th>Nama</th><th>Status</th>
+                        <?php endif; ?>
+                        <th>Aksi</th>
+                    </tr>
+                </thead>
                 <tbody>
                     <?php foreach($list_data as $r): ?>
                     <tr>
                         <td><input type="checkbox" name="selected_ids[]" value="<?=$r[$pk]?>"></td>
+                        
                         <?php if($table=='geotags'): $i=get_photo_url($r['photoPath'], $photo_base_url); ?>
                         <td><?php if($i):?><img src="<?=$i?>" width="40" height="40" style="object-fit:cover;"><?php endif; ?></td>
                         <td><?=$r['id']?></td><td><?=$r['itemType']?></td><td><?=$r['locationName']?></td><td><?=$r['condition']?></td>
@@ -434,11 +467,45 @@ if (in_array($action, ['list', 'gallery', 'map', 'logs', 'users'])) {
                 <input type="hidden" name="csrf_token" value="<?=$_SESSION['csrf_token']?>">
                 <?php if($table=='geotags'): ?>
                     <input type="hidden" name="id" value="<?=$d['id']?>">
-                    <label>Tipe</label><input type="text" name="itemType" value="<?=$d['itemType']?>" style="width:100%; margin-bottom:10px;">
-                    <label>Kondisi</label><select name="condition" style="width:100%; margin-bottom:10px;"><?php foreach(['Baik','Rusak','Cukup','Buruk'] as $c) echo "<option value='$c' ".($d['condition']==$c?'selected':'').">$c</option>"; ?></select>
-                    <label>Detail</label><input type="text" name="details" value="<?=$d['details']?>" style="width:100%; margin-bottom:10px;">
-                    <div style="display:flex; gap:10px;"><input type="text" name="latitude" value="<?=$d['latitude']?>" placeholder="Lat"><input type="text" name="longitude" value="<?=$d['longitude']?>" placeholder="Lng"></div>
-                    <br><label>Sync?</label><select name="isSynced" style="width:100%; margin-bottom:10px;"><option value="1" <?=$d['isSynced']?'selected':''?>>Ya</option><option value="0" <?=!$d['isSynced']?'selected':''?>>Tidak</option></select>
+                    
+                    <label>Jenis Pohon</label>
+                    <select name="itemType" style="width:100%; margin-bottom:10px; padding:8px; border:1px solid #ccc; border-radius:4px;">
+                        <?php 
+                        foreach($tree_types as $type) {
+                            $selected = ($d['itemType'] == $type) ? 'selected' : '';
+                            echo "<option value='$type' $selected>$type</option>";
+                        }
+                        ?>
+                    </select>
+
+                    <label>Lokasi</label>
+                    <select name="locationName" style="width:100%; margin-bottom:10px; padding:8px; border:1px solid #ccc; border-radius:4px;">
+                        <?php 
+                        foreach($locations_list as $loc) {
+                            $selected = ($d['locationName'] == $loc) ? 'selected' : '';
+                            echo "<option value='$loc' $selected>$loc</option>";
+                        }
+                        ?>
+                    </select>
+
+                    <label>Kondisi</label>
+                    <select name="condition" style="width:100%; margin-bottom:10px; padding:8px; border:1px solid #ccc; border-radius:4px;">
+                        <?php foreach(['Hidup','Merana','Mati'] as $c) echo "<option value='$c' ".($d['condition']==$c?'selected':'').">$c</option>"; ?>
+                    </select>
+
+                    <label>Detail</label>
+                    <input type="text" name="details" value="<?=$d['details']?>" style="width:100%; margin-bottom:10px;">
+                    
+                    <div style="display:flex; gap:10px;">
+                        <input type="text" name="latitude" value="<?=$d['latitude']?>" placeholder="Lat" style="flex:1;">
+                        <input type="text" name="longitude" value="<?=$d['longitude']?>" placeholder="Lng" style="flex:1;">
+                    </div>
+                    
+                    <br><label>Sync?</label>
+                    <select name="isSynced" style="width:100%; margin-bottom:10px; padding:8px;">
+                        <option value="1" <?=$d['isSynced']?'selected':''?>>Ya</option>
+                        <option value="0" <?=!$d['isSynced']?'selected':''?>>Tidak</option>
+                    </select>
                 <?php else: ?>
                     <input type="text" name="projectId" value="<?=$d['projectId']??''?>" placeholder="ID" style="width:100%; margin-bottom:10px;">
                     <input type="text" name="activityName" value="<?=$d['activityName']??''?>" placeholder="Nama" style="width:100%; margin-bottom:10px;">
@@ -462,6 +529,13 @@ if (in_array($action, ['list', 'gallery', 'map', 'logs', 'users'])) {
 </div>
 
 <script>
+    function toggle(source) {
+        var checkboxes = document.querySelectorAll('input[name="selected_ids[]"]');
+        for (var i = 0; i < checkboxes.length; i++) {
+            checkboxes[i].checked = source.checked;
+        }
+    }
+
     function showModal(src, caption) {
         const m = document.getElementById('imgModal');
         const i = document.getElementById('modalImg');
