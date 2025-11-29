@@ -232,7 +232,7 @@ if (in_array($action, ['list', 'gallery', 'map', 'users'])) {
 <head>
     <meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1">
     <title>SeedLoc Admin</title>
-    <link rel="icon" href="https://seedloc.my.id/Logo.png" type="image/png">
+    <link rel="icon" href="https://seedloc.my.id/logo.png" type="image/png">
     
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
@@ -268,7 +268,7 @@ if(isset($_SESSION['swal_error'])){ echo "<script>Swal.fire({icon:'error',title:
 <?php if($action === 'login'): ?>
     <div style="width:100%;display:flex;justify-content:center;align-items:center;">
         <div class="card" style="width:300px;text-align:center;padding-top:40px;">
-            <img src="https://seedloc.my.id/Logo.png" width="80" style="margin-bottom:15px;border-radius:10px;">
+            <img src="https://seedloc.my.id/logo.png" width="80" style="margin-bottom:15px;border-radius:10px;">
             <h3>Admin Login</h3>
             <form method="post">
                 <input type="text" name="username" placeholder="Username" style="width:90%;margin-bottom:15px;" required>
