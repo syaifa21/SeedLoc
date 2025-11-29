@@ -68,7 +68,7 @@ if ($path !== '' && $path !== 'status' && !isAuthorized()) {
 switch($path) {
     case '':
     case 'status':
-        echo json_encode(['status' => 'online', 'version' => '1.6 (Centralized Data)']);
+        echo json_encode(['status' => 'online', 'version' => '1.1','time' => date('Y-m-d H:i:s'),'Sinkronisasi Berhasil']);
         break;
 
     case 'meta':
