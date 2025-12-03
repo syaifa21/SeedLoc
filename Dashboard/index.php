@@ -176,6 +176,7 @@ function build_url($params = []) {
             .filter-group { width: 100%; }
         }
     </style>
+    <link rel="icon" href="https://seedloc.my.id/logo.png" type="image/png">
 </head>
 <body>
 

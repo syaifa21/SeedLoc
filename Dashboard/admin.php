@@ -1,5 +1,5 @@
 <?php
-// admin.php - Fixed Pagination & Favicon
+// admin.php - Fixed: Restore CSV & KML Export Options
 
 session_start();
 
@@ -44,7 +44,7 @@ function get_photo_url($path, $base) {
     return (strpos($path, 'http') === 0) ? $path : $base . $path;
 }
 
-// Export Function
+// Export Function (ZIP, CSV, KML)
 function export_data($pdo, $ids, $type, $base_url, $upload_dir) {
     if(empty($ids)) return;
     $ph = implode(',', array_fill(0, count($ids), '?'));
@@ -78,15 +78,27 @@ function export_data($pdo, $ids, $type, $base_url, $upload_dir) {
             header('Content-Type: application/zip'); header('Content-disposition: attachment; filename='.$zipName);
             header('Content-Length: ' . filesize($tempZip)); readfile($tempZip); unlink($tempZip); exit;
         } else { $_SESSION['swal_warning'] = "Foto tidak ditemukan."; unlink($tempZip); return; }
+
     } elseif ($type === 'csv') {
-        header('Content-Type: text/csv'); header('Content-Disposition: attachment; filename="export.csv"');
+        header('Content-Type: text/csv'); header('Content-Disposition: attachment; filename="export_'.date('YmdHis').'.csv"');
         $out = fopen('php://output', 'w');
-        fputcsv($out, ['ID', 'Project', 'Lat', 'Lng', 'Location', 'Time', 'Type', 'Condition', 'Details', 'Photo']);
+        fputcsv($out, ['ID', 'ProjectID', 'Lat', 'Lng', 'Location', 'Time', 'Type', 'Condition', 'Details', 'PhotoURL']);
         while($r = $stmt->fetch()) {
             $r['photoPath'] = get_photo_url($r['photoPath'], $base_url);
             fputcsv($out, $r);
         }
         fclose($out); exit;
+
+    } elseif ($type === 'kml') {
+        header('Content-Type: application/vnd.google-earth.kml+xml'); header('Content-Disposition: attachment; filename="export_'.date('YmdHis').'.kml"');
+        echo '<?xml version="1.0" encoding="UTF-8"?><kml xmlns="http://www.opengis.net/kml/2.2"><Document>';
+        while($r = $stmt->fetch()) {
+            $img = get_photo_url($r['photoPath'], $base_url);
+            $desc = "<b>Kondisi:</b> {$r['condition']}<br><b>Lokasi:</b> {$r['locationName']}<br><b>Waktu:</b> {$r['timestamp']}";
+            if($img) $desc .= "<br><img src='$img' width='200'>";
+            echo "<Placemark><name>".htmlspecialchars($r['itemType'])."</name><description><![CDATA[$desc]]></description><Point><coordinates>{$r['longitude']},{$r['latitude']}</coordinates></Point></Placemark>";
+        }
+        echo '</Document></kml>'; exit;
     }
 }
 
@@ -121,13 +133,14 @@ if ($action !== 'login') require_auth();
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['csrf_token'])) {
     if (!hash_equals($_SESSION['csrf_token'], $_POST['csrf_token'])) die('CSRF Fail');
     
-    // Bulk Actions
+    // Bulk Actions Handler
     if (isset($_POST['bulk_action'])) {
         $ids = $_POST['selected_ids'] ?? [];
         $type = $_POST['bulk_action_type'] ?? '';
         if (!empty($ids)) {
             if ($type == 'download_zip') export_data($pdo, $ids, 'download_zip', $photo_base_url, $upload_dir);
             elseif ($type == 'export_csv') export_data($pdo, $ids, 'csv', $photo_base_url, $upload_dir);
+            elseif ($type == 'export_kml') export_data($pdo, $ids, 'kml', $photo_base_url, $upload_dir);
             elseif ($type == 'delete_selected') {
                 $ph = implode(',', array_fill(0, count($ids), '?'));
                 if($table=='geotags'){
@@ -144,7 +157,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['csrf_token'])) {
         }
     }
 
-    // CRUD
+    // CRUD Update/Create
     if (isset($_POST['update']) || isset($_POST['create'])) {
         try {
             $id = $_POST[$pk] ?? null;
@@ -166,6 +179,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['csrf_token'])) {
             $_SESSION['swal_success'] = "Data disimpan"; header("Location: ?action=list&table=$table"); exit;
         } catch(Exception $e) { $_SESSION['swal_error'] = $e->getMessage(); }
     }
+    // Delete Single
     if (isset($_POST['delete'])) {
         $id = $_POST['id'];
         if($table=='geotags'){
@@ -177,7 +191,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['csrf_token'])) {
     }
 }
 
-// --- 6. DATA FETCHING & QUERY BUILDER ---
+// --- 6. DATA FETCHING ---
 function buildWhere($table) {
     $where = []; $p = [];
     if (!empty($_GET['search'])) { if ($table == 'geotags') { $where[] = "(itemType LIKE ? OR locationName LIKE ?)"; $p[] = "%{$_GET['search']}%"; $p[] = "%{$_GET['search']}%"; } }
@@ -209,19 +223,12 @@ if (in_array($action, ['list', 'gallery', 'map', 'users'])) {
         list($where, $p) = buildWhere($table);
         $w_sql = $where ? "WHERE ".implode(' AND ', $where) : "";
         
-        // Count Total
-        $total_stmt = $pdo->prepare("SELECT COUNT(*) FROM `$table` $w_sql");
-        $total_stmt->execute($p);
-        $total_rows = $total_stmt->fetchColumn();
-        $total_pages = ceil($total_rows / $per_page);
-        
-        // Offset Logic
+        $total_stmt = $pdo->prepare("SELECT COUNT(*) FROM `$table` $w_sql"); $total_stmt->execute($p);
+        $total_rows = $total_stmt->fetchColumn(); $total_pages = ceil($total_rows / $per_page);
         $offset = ($page - 1) * $per_page;
         
-        // Fetch Data
         $stmt = $pdo->prepare("SELECT * FROM `$table` $w_sql ORDER BY `$pk` DESC LIMIT $per_page OFFSET $offset");
-        $stmt->execute($p);
-        $list_data = $stmt->fetchAll();
+        $stmt->execute($p); $list_data = $stmt->fetchAll();
         
         if ($table == 'geotags') $projects_list = $pdo->query("SELECT projectId, activityName FROM projects")->fetchAll();
     }
@@ -233,7 +240,6 @@ if (in_array($action, ['list', 'gallery', 'map', 'users'])) {
     <meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1">
     <title>SeedLoc Admin</title>
     <link rel="icon" href="https://seedloc.my.id/logo.png" type="image/png">
-    
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
@@ -263,6 +269,7 @@ if (in_array($action, ['list', 'gallery', 'map', 'users'])) {
 <?php 
 if(isset($_SESSION['swal_success'])){ echo "<script>Swal.fire({icon:'success',title:'Berhasil',text:'{$_SESSION['swal_success']}',timer:1500,showConfirmButton:false});</script>"; unset($_SESSION['swal_success']); }
 if(isset($_SESSION['swal_error'])){ echo "<script>Swal.fire({icon:'error',title:'Error',text:'{$_SESSION['swal_error']}'});</script>"; unset($_SESSION['swal_error']); }
+if(isset($_SESSION['swal_warning'])){ echo "<script>Swal.fire({icon:'warning',title:'Info',text:'{$_SESSION['swal_warning']}'});</script>"; unset($_SESSION['swal_warning']); }
 ?>
 
 <?php if($action === 'login'): ?>
@@ -322,7 +329,7 @@ if(isset($_SESSION['swal_error'])){ echo "<script>Swal.fire({icon:'error',title:
         <div id="map" style="height:600px;border-radius:8px;"></div>
         <script>
             var m = L.map('map').setView([-6.2, 106.8], 5);
-            L.control.layers({"Jalan":L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png'),"Satelit":L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}')}).addTo(m);
+            L.control.layers({"Open Street Map":L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png'),"Satelit":L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}')}).addTo(m);
             var pts = <?=json_encode($map_data)?>; var b=[];
             pts.forEach(p=>{
                 var lat=parseFloat(p.latitude),lng=parseFloat(p.longitude);
@@ -351,8 +358,17 @@ if(isset($_SESSION['swal_error'])){ echo "<script>Swal.fire({icon:'error',title:
         <form method="post" id="bulkForm">
             <?php if($table == 'geotags'): ?>
             <div style="background:#e8f5e9;padding:10px;border-radius:8px;margin-bottom:10px;display:flex;gap:10px;">
-                <b>Aksi Massal:</b> <select name="bulk_action_type"><option value="">Pilih...</option><option value="download_zip">Download ZIP</option><option value="delete_selected">Hapus</option></select>
-                <button type="button" onclick="confirmBulk()" class="btn btn-w">Proses</button> <button name="bulk_action" id="realBulkBtn" style="display:none;"></button>
+                <b>Aksi Massal:</b> 
+                <select name="bulk_action_type" required>
+                    <option value="">Pilih...</option>
+                    <option value="download_zip">Download ZIP (Foto)</option>
+                    <option value="export_csv">Export Excel (CSV)</option>
+                    <option value="export_kml">Export Google Earth (KML)</option>
+                    <option value="mark_synced">Tandai Sudah Sync</option>
+                    <option value="delete_selected">Hapus Data Terpilih</option>
+                </select>
+                <button type="button" onclick="confirmBulk()" class="btn btn-w">Proses</button> 
+                <button name="bulk_action" id="realBulkBtn" style="display:none;"></button>
                 <input type="hidden" name="csrf_token" value="<?=$_SESSION['csrf_token']?>">
             </div>
             <?php endif; ?>
@@ -380,19 +396,11 @@ if(isset($_SESSION['swal_error'])){ echo "<script>Swal.fire({icon:'error',title:
         
         <div style="display:flex;justify-content:center;gap:5px;margin-top:20px;">
             <?php 
-            // Pastikan parameter URL tetap terbawa
             $q = $_GET; 
-            $q['action'] = $action; // Force action
-            $q['table'] = $table;   // Force table
-            
-            if($page > 1) { 
-                $q['page'] = $page - 1; 
-                echo '<a href="?'.http_build_query($q).'" class="btn btn-p">Prev</a>'; 
-            }
-            if($page < $total_pages) { 
-                $q['page'] = $page + 1; 
-                echo '<a href="?'.http_build_query($q).'" class="btn btn-p">Next</a>'; 
-            } 
+            $q['action'] = $action; 
+            $q['table'] = $table;
+            if($page > 1) { $q['page'] = $page - 1; echo '<a href="?'.http_build_query($q).'" class="btn btn-p">Prev</a>'; }
+            if($page < $total_pages) { $q['page'] = $page + 1; echo '<a href="?'.http_build_query($q).'" class="btn btn-p">Next</a>'; } 
             ?>
         </div>
 
