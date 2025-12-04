@@ -7,15 +7,16 @@ class BackgroundLocationService {
   factory BackgroundLocationService() => _instance;
   BackgroundLocationService._internal();
 
-  StreamSubscription<Position>? _positionStream;
+  // Stream subscription sekarang dihandle penuh oleh LocationService
+  // Variabel _positionStream di sini dihapus karena tidak terpakai (redundant)
+  
   final List<Position> _recentPositions = [];
   Position? _currentBestPosition;
   bool _isTracking = false;
   
-  // Keep last 30 positions (30 seconds of data)
+  // Keep last 30 positions
   static const int _maxPositions = 30;
   
-  // Callbacks for position updates
   final List<Function(Position)> _listeners = [];
 
   bool get isTracking => _isTracking;
@@ -29,7 +30,7 @@ class BackgroundLocationService {
     _isTracking = true;
     _recentPositions.clear();
 
-    // Start continuous location tracking with Kalman filter
+    // Menggunakan LocationService yang baru (High Accuracy + Kalman Filter)
     LocationService.startContinuousTracking((Position position) {
       _addPosition(position);
       _notifyListeners(position);
@@ -41,9 +42,8 @@ class BackgroundLocationService {
     if (!_isTracking) return;
 
     _isTracking = false;
-    LocationService.stopContinuousTracking();
-    _positionStream?.cancel();
-    _positionStream = null;
+    LocationService.stopContinuousTracking(); // Stop dari sumbernya
+    // Tidak perlu cancel manual stream di sini karena static di LocationService
   }
 
   // Add position to buffer
@@ -55,7 +55,7 @@ class BackgroundLocationService {
       _recentPositions.removeAt(0);
     }
 
-    // Update current best position (lowest accuracy)
+    // Logic Simple: Simpan yang akurasinya paling kecil (paling bagus)
     if (_currentBestPosition == null || position.accuracy < _currentBestPosition!.accuracy) {
       _currentBestPosition = position;
     }
@@ -65,12 +65,11 @@ class BackgroundLocationService {
   Position? getOptimalPosition() {
     if (_recentPositions.isEmpty) return null;
     
-    // Use at least 5 positions for better accuracy
     if (_recentPositions.length < 5) {
       return _currentBestPosition;
     }
 
-    // Filter and calculate weighted average
+    // Filter outlier & hitung rata-rata
     List<Position> filtered = _removeOutliers(_recentPositions);
     return _calculateWeightedAverage(filtered);
   }
@@ -137,15 +136,14 @@ class BackgroundLocationService {
     double avgLat = weightedLat / totalWeight;
     double avgLng = weightedLng / totalWeight;
     
+    // Perbaikan rumus akurasi agar lebih optimis
     double bestAccuracy = positions.map((p) => p.accuracy).reduce((a, b) => a < b ? a : b);
-    double avgAccuracy = totalAccuracy / positions.length;
-    double finalAccuracy = (bestAccuracy * 0.7 + avgAccuracy * 0.3);
-
+    
     return Position(
       latitude: avgLat,
       longitude: avgLng,
       timestamp: DateTime.now(),
-      accuracy: finalAccuracy,
+      accuracy: bestAccuracy, // Gunakan akurasi terbaik sebagai referensi
       altitude: positions.last.altitude,
       heading: positions.last.heading,
       speed: positions.last.speed,
@@ -155,24 +153,20 @@ class BackgroundLocationService {
     );
   }
 
-  // Add listener for position updates
   void addListener(Function(Position) callback) {
     _listeners.add(callback);
   }
 
-  // Remove listener
   void removeListener(Function(Position) callback) {
     _listeners.remove(callback);
   }
 
-  // Notify all listeners
   void _notifyListeners(Position position) {
     for (var listener in _listeners) {
       listener(position);
     }
   }
 
-  // Get statistics
   Map<String, dynamic> getStatistics() {
     if (_recentPositions.isEmpty) {
       return {
@@ -194,7 +188,6 @@ class BackgroundLocationService {
     };
   }
 
-  // Clear all data
   void clear() {
     _recentPositions.clear();
     _currentBestPosition = null;

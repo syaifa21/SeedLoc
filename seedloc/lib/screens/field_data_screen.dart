@@ -2,18 +2,15 @@ import 'dart:async';
 import 'dart:math';
 import 'package:flutter/material.dart';
 import 'package:geolocator/geolocator.dart';
-import 'package:permission_handler/permission_handler.dart';
+import 'package:device_info_plus/device_info_plus.dart';
 import '../models/geotag.dart';
 import '../database/database_helper.dart';
 import '../services/location_service.dart';
-import '../services/background_location_service.dart';
 import '../services/image_service.dart';
-import '../services/metadata_service.dart'; // Import Service Metadata
-import 'package:device_info_plus/device_info_plus.dart';
+import '../services/metadata_service.dart';
 
 class FieldDataScreen extends StatefulWidget {
   final int projectId;
-
   const FieldDataScreen({super.key, required this.projectId});
 
   @override
@@ -24,478 +21,427 @@ class _FieldDataScreenState extends State<FieldDataScreen> {
   final _formKey = GlobalKey<FormState>();
   final TextEditingController _detailsController = TextEditingController();
 
-  // --- DATA DINAMIS (Tidak lagi hardcoded) ---
+  // --- DATA INPUT FORM (Fitur Penting: Metadata Dinamis) ---
   List<String> _locations = [];
   List<String> _treeTypes = [];
   bool _isLoadingMeta = true;
-
   String? _selectedLocation;
   String? _itemType;
-  // -------------------------------------------
-
   String _condition = 'Baik';
   final List<String> _conditions = ['Hidup', 'Merana', 'Mati'];
-
   String? _photoPath;
-  bool _isCapturingLocation = false;
-  double _progress = 0.0;
-  String _accuracyText = 'Akurasi: -- m';
-  String _currentLocationText = 'Lokasi Terkini: --';
-  Position? _averagedPosition;
 
-  String _locationNameStatus = 'Akurasi Final: --';
-  String _samplesInfo = 'Sampel: 0';
-
-  Timer? _timer;
-  Timer? _uiUpdateTimer;
+  // --- LOGIC GPS SMART FILTERING (Fitur Baru: Akurasi Tinggi) ---
+  StreamSubscription<Position>? _positionStream;
+  final List<Position> _positionBuffer = []; // Buffer untuk menampung data GPS
+  Position? _finalPosition; // Hasil perhitungan terbaik
   
-  final BackgroundLocationService _bgLocationService = BackgroundLocationService();
+  // Status UI GPS
+  String _gpsStatusText = "Menunggu Sinyal...";
+  Color _gpsColor = Colors.orange;
+  double _currentRawAccuracy = 0; // Akurasi mentah dari satelit
+  bool _isLocked = false; // Fitur kunci lokasi agar tidak berubah saat foto
 
   @override
   void initState() {
     super.initState();
-    _loadMetadata(); // Load data saat screen dibuka
-    _startUIUpdates();
-  }
-
-  // FUNGSI LOAD DATA DARI MEMORI LOKAL
-  Future<void> _loadMetadata() async {
-    var trees = await MetadataService.getTreeTypes();
-    var locs = await MetadataService.getLocations();
-
-    if (mounted) {
-      setState(() {
-        _treeTypes = trees;
-        _locations = locs;
-
-        // Set default value (item pertama)
-        if (_treeTypes.isNotEmpty) _itemType = _treeTypes.first;
-        if (_locations.isNotEmpty) _selectedLocation = _locations.first;
-        
-        _isLoadingMeta = false;
-      });
-    }
+    _loadMetadata(); // Muat data dropdown
+    _startSmartTracking(); // Mulai tracking GPS otomatis
   }
 
   @override
   void dispose() {
-    _timer?.cancel();
-    _uiUpdateTimer?.cancel();
+    _positionStream?.cancel(); // Matikan GPS saat keluar menu ini hemat baterai
     _detailsController.dispose();
     super.dispose();
   }
 
-  void _startUIUpdates() {
-    _uiUpdateTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
-      if (!mounted) return;
-
-      var stats = _bgLocationService.getStatistics();
-      Position? currentPos = _bgLocationService.currentBestPosition;
-
-      setState(() {
-        if (currentPos != null) {
-          _accuracyText = 'Akurasi: ${currentPos.accuracy.toStringAsFixed(1)} m';
-          _currentLocationText = 'Lat: ${currentPos.latitude.toStringAsFixed(6)}, Lng: ${currentPos.longitude.toStringAsFixed(6)}';
-          _samplesInfo = 'Sampel: ${stats['totalSamples']} | Terbaik: ${stats['bestAccuracy'].toStringAsFixed(1)}m';
-        }
-      });
-    });
-  }
-
-  Future<void> _requestPermissions() async {
-    await Permission.location.request();
-    await Permission.camera.request();
-  }
-
-  Future<String> _getDeviceId() async {
-    DeviceInfoPlugin deviceInfo = DeviceInfoPlugin();
-    AndroidDeviceInfo androidInfo = await deviceInfo.androidInfo;
-    return androidInfo.id;
-  }
-
-  Future<void> _captureLocation() async {
-    await _requestPermissions();
-
-    setState(() {
-      _isCapturingLocation = true;
-      _progress = 0.0;
-      _samplesInfo = 'Sampel: 0';
-      _locationNameStatus = 'Akurasi Final: --';
-    });
-
-    List<Position> samples = [];
-    int maxSamples = 5;
-    int sampleCount = 0;
-
+  // --- 1. LOAD DATA DARI SERVER/LOKAL ---
+  Future<void> _loadMetadata() async {
     try {
-      _timer = Timer.periodic(const Duration(seconds: 1), (timer) async {
-        try {
-          Position position = await LocationService.getCurrentPosition();
-          samples.add(position);
-          sampleCount++;
-
-          if (mounted) {
-            setState(() {
-              _progress = sampleCount / maxSamples;
-              _samplesInfo = 'Sampel: $sampleCount/$maxSamples';
-              _accuracyText = 'Akurasi: ${position.accuracy.toStringAsFixed(1)} m';
-              _currentLocationText = 'Lat: ${position.latitude.toStringAsFixed(6)}, Lng: ${position.longitude.toStringAsFixed(6)}';
-            });
-          }
-
-          if (position.accuracy < 5.0) {
-            timer.cancel();
-            await _finishCapture(samples, sampleCount);
-            return;
-          }
-
-          if (sampleCount >= maxSamples) {
-            timer.cancel();
-            await _finishCapture(samples, sampleCount);
-          }
-        } catch (e) {
-          print('Error getting sample: $e');
-        }
-      });
+      var trees = await MetadataService.getTreeTypes();
+      var locs = await MetadataService.getLocations();
+      
+      if (mounted) {
+        setState(() {
+          _treeTypes = trees;
+          _locations = locs;
+          // Auto-select item pertama jika ada
+          if (_treeTypes.isNotEmpty) _itemType = _treeTypes.first;
+          if (_locations.isNotEmpty) _selectedLocation = _locations.first;
+          _isLoadingMeta = false;
+        });
+      }
     } catch (e) {
+      print("Error loading metadata: $e");
+      if (mounted) setState(() => _isLoadingMeta = false);
+    }
+  }
+
+  // --- 2. LOGIC GPS PINTAR (SMART BUFFERING) ---
+  void _startSmartTracking() async {
+    // Cek Izin Lokasi
+    LocationPermission permission = await Geolocator.checkPermission();
+    if (permission == LocationPermission.denied) {
+      permission = await Geolocator.requestPermission();
+      if (permission == LocationPermission.denied || permission == LocationPermission.deniedForever) {
+         setState(() {
+           _gpsStatusText = "Izin Ditolak";
+           _gpsColor = Colors.red;
+         });
+         return;
+      }
+    }
+
+    // Mulai Stream (Menggunakan stream High Accuracy dari LocationService)
+    _positionStream = LocationService.getHighAccuracyStream().listen((Position newPos) {
+      if (!mounted || _isLocked) return; // Jangan update jika sudah dikunci user
+
       setState(() {
-        _isCapturingLocation = false;
-        _progress = 0.0;
+        _currentRawAccuracy = newPos.accuracy;
       });
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Error: $e')));
-    }
-  }
 
-  Future<void> _finishCapture(List<Position> samples, int sampleCount) async {
-    if (samples.isEmpty) {
-      setState(() => _isCapturingLocation = false);
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Gagal mendapatkan lokasi')));
-      return;
-    }
+      // LOGIKA RESET OTOMATIS:
+      // Jika user berjalan lebih dari 10 meter dari titik rata-rata sebelumnya, 
+      // kita anggap user pindah ke pohon baru -> Reset Buffer.
+      if (_finalPosition != null) {
+        double dist = LocationService.calculateDistance(
+          newPos.latitude, newPos.longitude, 
+          _finalPosition!.latitude, _finalPosition!.longitude
+        );
+        if (dist > 10.0) {
+          _positionBuffer.clear(); 
+          // _finalPosition = null; // Opsional: null-kan atau biarkan update perlahan
+        }
+      }
 
-    List<Position> filtered = _removeOutliers(samples);
-    Position averaged = _calculateWeightedAverage(filtered);
-
-    setState(() {
-      _averagedPosition = averaged;
-      _isCapturingLocation = false;
-      _progress = 1.0;
-      _locationNameStatus = 'Akurasi Final: ${averaged.accuracy.toStringAsFixed(1)} m';
+      // LOGIKA FILTER SAMPAH:
+      // Buang data jika akurasi > 30m (kecuali belum punya data sama sekali)
+      if (newPos.accuracy < 30.0 || _positionBuffer.isEmpty) {
+        _positionBuffer.add(newPos);
+        
+        // Hanya simpan 10 data terbaik terakhir (Sliding Window)
+        if (_positionBuffer.length > 10) {
+          _positionBuffer.removeAt(0);
+        }
+        
+        // HITUNG RATA-RATA TERBOBOT (Weighted Average)
+        _finalPosition = _calculateWeightedAverage(_positionBuffer);
+        
+        // Update Tampilan Status
+        _updateGpsStatus(_finalPosition!);
+      }
+    }, onError: (e) {
+      setState(() {
+        _gpsStatusText = "GPS Error";
+        _gpsColor = Colors.red;
+      });
     });
-
-    if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-        content: Text('Lokasi ditangkap! Akurasi: ${averaged.accuracy.toStringAsFixed(1)}m (dari $sampleCount sampel)'),
-        backgroundColor: Colors.green,
-        duration: const Duration(seconds: 3),
-      ));
-    }
   }
 
-  List<Position> _removeOutliers(List<Position> positions) {
-    if (positions.length < 4) return positions;
-
-    List<double> latitudes = positions.map((p) => p.latitude).toList()..sort();
-    List<double> longitudes = positions.map((p) => p.longitude).toList()..sort();
-
-    double medianLat = _calculateMedian(latitudes);
-    double medianLng = _calculateMedian(longitudes);
-
-    List<double> distances = positions.map((p) {
-      double latDiff = p.latitude - medianLat;
-      double lngDiff = p.longitude - medianLng;
-      return sqrt(latDiff * latDiff + lngDiff * lngDiff);
-    }).toList();
-
-    List<double> sortedDistances = List.from(distances)..sort();
-    double q1 = _calculateMedian(sortedDistances.sublist(0, sortedDistances.length ~/ 2));
-    double q3 = _calculateMedian(sortedDistances.sublist(sortedDistances.length ~/ 2));
-    double iqr = q3 - q1;
-    double threshold = q3 + 1.5 * iqr;
-
-    List<Position> filtered = [];
-    for (int i = 0; i < positions.length; i++) {
-      if (distances[i] <= threshold) filtered.add(positions[i]);
-    }
-
-    return filtered.isEmpty ? positions : filtered;
-  }
-
-  double _calculateMedian(List<double> values) {
-    if (values.isEmpty) return 0;
-    int middle = values.length ~/ 2;
-    return (values.length % 2 == 0) ? (values[middle - 1] + values[middle]) / 2 : values[middle];
-  }
-
+  // ALGORITMA: Semakin kecil nilai akurasi (misal 3m), semakin besar bobotnya.
+  // Data 3m jauh lebih dipercaya daripada data 15m.
   Position _calculateWeightedAverage(List<Position> positions) {
-    if (positions.isEmpty) throw Exception('No positions to average');
-    if (positions.length == 1) return positions.first;
+    if (positions.isEmpty) return positions.first;
 
-    double totalWeight = 0, weightedLat = 0, weightedLng = 0, totalAccuracy = 0;
+    double sumLat = 0, sumLng = 0, sumWeight = 0;
+    double bestAcc = 999.0;
 
-    for (var pos in positions) {
-      double weight = 1.0 / (pos.accuracy * pos.accuracy);
-      totalWeight += weight;
-      weightedLat += pos.latitude * weight;
-      weightedLng += pos.longitude * weight;
-      totalAccuracy += pos.accuracy;
+    for (var p in positions) {
+      if (p.accuracy < bestAcc) bestAcc = p.accuracy;
+
+      // Rumus Bobot: 1 / kuadrat akurasi
+      double weight = 1 / (p.accuracy * p.accuracy);
+      
+      sumLat += p.latitude * weight;
+      sumLng += p.longitude * weight;
+      sumWeight += weight;
     }
-
-    double bestAccuracy = positions.map((p) => p.accuracy).reduce((a, b) => a < b ? a : b);
-    double avgAccuracy = totalAccuracy / positions.length;
-    double finalAccuracy = (bestAccuracy * 0.7 + avgAccuracy * 0.3);
 
     return Position(
-      latitude: weightedLat / totalWeight,
-      longitude: weightedLng / totalWeight,
+      latitude: sumLat / sumWeight,
+      longitude: sumLng / sumWeight,
+      accuracy: bestAcc, // Kita pakai akurasi terbaik yang pernah didapat sebagai patokan
       timestamp: DateTime.now(),
-      accuracy: finalAccuracy,
       altitude: positions.last.altitude,
       heading: positions.last.heading,
       speed: positions.last.speed,
-      speedAccuracy: positions.last.speedAccuracy,
-      altitudeAccuracy: positions.last.altitudeAccuracy,
-      headingAccuracy: positions.last.headingAccuracy,
+      speedAccuracy: 0, 
+      altitudeAccuracy: 0, 
+      headingAccuracy: 0
     );
   }
 
-  String _buildGeotagWatermarkInfo() {
-    final DateTime now = DateTime.now();
-    final String formattedDate = '${now.day}/${now.month}/${now.year} ${now.hour}:${now.minute.toString().padLeft(2, '0')}:${now.second.toString().padLeft(2, '0')}';
-
-    return 'Lokasi: ${_selectedLocation ?? "Unknown"}\n'
-        'Koordinat: ${_averagedPosition!.latitude.toStringAsFixed(6)}, ${_averagedPosition!.longitude.toStringAsFixed(6)}\n'
-        'Akurasi: ${_averagedPosition!.accuracy.toStringAsFixed(1)} m\n'
-        'Waktu: $formattedDate\n'
-        'Tipe Item: ${_itemType ?? "Unknown"}\n'
-        'Kondisi: $_condition\n'
-        'Detail: ${_detailsController.text}';
+  void _updateGpsStatus(Position pos) {
+    setState(() {
+      if (pos.accuracy <= 5.0) {
+        _gpsStatusText = "SANGAT BAGUS (${pos.accuracy.toStringAsFixed(1)}m)";
+        _gpsColor = Colors.green.shade700;
+      } else if (pos.accuracy <= 10.0) {
+        _gpsStatusText = "BAGUS (${pos.accuracy.toStringAsFixed(1)}m)";
+        _gpsColor = Colors.green;
+      } else if (pos.accuracy <= 15.0) {
+        _gpsStatusText = "CUKUP (${pos.accuracy.toStringAsFixed(1)}m)";
+        _gpsColor = Colors.orange;
+      } else {
+        _gpsStatusText = "LEMAH (${pos.accuracy.toStringAsFixed(1)}m)";
+        _gpsColor = Colors.red;
+      }
+    });
   }
 
-  String _buildPhotoFileName() {
-    final DateTime now = DateTime.now();
-    final String formattedDateTime = '${now.year}${now.month.toString().padLeft(2, '0')}${now.day.toString().padLeft(2, '0')}_'
-        '${now.hour.toString().padLeft(2, '0')}${now.minute.toString().padLeft(2, '0')}${now.second.toString().padLeft(2, '0')}';
-
-    final String safeItemType = (_itemType ?? "Item").replaceAll(RegExp(r'[^a-zA-Z0-9_]'), '_');
-    final String safeCondition = _condition.replaceAll(RegExp(r'[^a-zA-Z0-9_]'), '_');
-
-    return '${safeItemType}_${safeCondition}_$formattedDateTime';
+  // --- 3. FITUR KUNCI LOKASI ---
+  void _toggleLock() {
+    if (_finalPosition == null) return;
+    setState(() {
+      _isLocked = !_isLocked;
+      if (!_isLocked) {
+        // Jika buka kunci, reset buffer agar ambil data fresh untuk pohon berikutnya
+        _positionBuffer.clear();
+        _finalPosition = null;
+        _gpsStatusText = "Mencari ulang...";
+        _photoPath = null; // Reset foto juga jika lokasi direset
+      }
+    });
   }
 
+  // --- 4. AMBIL FOTO (Fitur Penting: Watermark) ---
   Future<void> _takePhoto() async {
-    if (_averagedPosition == null) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Harap tangkap lokasi terlebih dahulu')));
+    // Validasi: Lokasi harus ada
+    if (_finalPosition == null) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Tunggu sinyal GPS...')));
       return;
     }
 
-    String? photoPath = await ImageService.pickImage(
-        geotagInfo: _buildGeotagWatermarkInfo(),
-        customFileName: _buildPhotoFileName(),
-        tempPath: 'unused_path');
+    // Kunci lokasi otomatis saat mau foto agar data konsisten
+    if (!_isLocked) setState(() => _isLocked = true);
 
-    if (photoPath != null) {
-      setState(() => _photoPath = photoPath);
+    // Siapkan Info Watermark
+    final DateTime now = DateTime.now();
+    String info = 'Lokasi: ${_selectedLocation ?? "-"}\n'
+        'Lat: ${_finalPosition!.latitude.toStringAsFixed(6)}\n'
+        'Lng: ${_finalPosition!.longitude.toStringAsFixed(6)}\n'
+        'Akurasi: ${_finalPosition!.accuracy.toStringAsFixed(1)}m\n'
+        'Waktu: ${now.day}/${now.month}/${now.year} ${now.hour}:${now.minute}\n'
+        'Item: ${_itemType ?? "-"}\n'
+        'Kondisi: $_condition';
+
+    String fileName = 'IMG_${now.millisecondsSinceEpoch}';
+
+    // Panggil Service Foto
+    String? path = await ImageService.pickImage(
+        geotagInfo: info,
+        customFileName: fileName,
+        tempPath: 'unused' // Parameter pelengkap
+    );
+
+    if (path != null) {
+      setState(() => _photoPath = path);
+    } else {
+      // Jika batal foto, buka kunci lagi (opsional)
+      // setState(() => _isLocked = false); 
     }
   }
 
-  Future<void> _saveGeotag() async {
-    if (!_formKey.currentState!.validate() || _averagedPosition == null) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Harap lengkapi semua kolom dan tangkap lokasi')));
-      return;
+  // --- 5. SIMPAN DATA (Fitur Penting: Device ID & DB Save) ---
+  Future<void> _saveData() async {
+    if (!_formKey.currentState!.validate()) return;
+    
+    if (_finalPosition == null) {
+       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Lokasi belum terkunci!')));
+       return;
+    }
+    
+    // Warning jika akurasi masih di atas 15m
+    if (_finalPosition!.accuracy > 15.0) {
+      bool confirm = await showDialog(
+        context: context, 
+        builder: (c) => AlertDialog(
+          title: const Text("Akurasi Rendah"),
+          content: Text("Akurasi saat ini ${_finalPosition!.accuracy.toStringAsFixed(1)}m. Tetap simpan?"),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(c, false), child: const Text("Batal")),
+            TextButton(onPressed: () => Navigator.pop(c, true), child: const Text("Ya, Simpan")),
+          ],
+        )
+      ) ?? false;
+      if (!confirm) return;
     }
 
-    if (_averagedPosition!.accuracy < 1.0 || _averagedPosition!.accuracy > 5.0) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Akurasi lokasi tidak memenuhi syarat (harus 1-5 meter)')));
-      return;
+    // Ambil Device ID (Penting untuk tracking user)
+    String deviceId = "Unknown";
+    try {
+      AndroidDeviceInfo androidInfo = await DeviceInfoPlugin().androidInfo;
+      deviceId = androidInfo.id;
+    } catch (e) {
+      print("Error getting device ID: $e");
     }
 
-    String deviceId = await _getDeviceId();
-
-    Geotag geotag = Geotag(
+    // Buat Objek Geotag
+    Geotag newGeotag = Geotag(
       projectId: widget.projectId,
-      latitude: _averagedPosition!.latitude,
-      longitude: _averagedPosition!.longitude,
+      latitude: _finalPosition!.latitude,
+      longitude: _finalPosition!.longitude,
       locationName: _selectedLocation!,
       timestamp: DateTime.now().toIso8601String(),
       itemType: _itemType!,
       condition: _condition,
       details: _detailsController.text,
-      photoPath: _photoPath ?? '',
+      photoPath: _photoPath ?? "",
       deviceId: deviceId,
     );
 
-    DatabaseHelper dbHelper = DatabaseHelper();
-    await dbHelper.insertGeotag(geotag);
+    // Simpan ke SQLite
+    await DatabaseHelper().insertGeotag(newGeotag);
 
-    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Geotag berhasil disimpan')));
-
-    if (mounted) Navigator.of(context).pop(true);
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+        content: Text('Data Berhasil Disimpan!'), 
+        backgroundColor: Colors.green
+      ));
+      
+      // RESET FORM UNTUK INPUT BERIKUTNYA
+      _detailsController.clear();
+      setState(() { 
+        _photoPath = null; 
+        _isLocked = false; // Buka kunci GPS
+        _positionBuffer.clear(); // Reset buffer GPS
+        _gpsStatusText = "Mencari titik baru...";
+        // _selectedLocation & _itemType JANGAN direset agar mempercepat input berulang
+      });
+    }
   }
 
   @override
   Widget build(BuildContext context) {
-    // Tampilkan Loading jika data metadata belum siap
-    if (_isLoadingMeta) {
-      return Scaffold(
-        appBar: AppBar(title: const Text('Pengumpulan Data Lapangan')),
-        body: const Center(child: CircularProgressIndicator()),
-      );
-    }
+    if (_isLoadingMeta) return const Scaffold(body: Center(child: CircularProgressIndicator()));
 
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('Pengumpulan Data Lapangan'),
-      ),
+      appBar: AppBar(title: const Text('Input Data Lapangan')),
       body: SingleChildScrollView(
-        padding: const EdgeInsets.all(16.0),
+        padding: const EdgeInsets.all(16),
         child: Form(
           key: _formKey,
           child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              // Location Capture Section
+              // --- PANEL GPS (Baru & Lebih Informatif) ---
               Card(
+                color: _gpsColor.withOpacity(0.1),
+                elevation: 0,
+                shape: RoundedRectangleBorder(
+                  side: BorderSide(color: _gpsColor, width: 2),
+                  borderRadius: BorderRadius.circular(12)
+                ),
                 child: Padding(
-                  padding: const EdgeInsets.all(16.0),
-                  child: Column(
+                  padding: const EdgeInsets.all(12),
+                  child: Row(
                     children: [
-                      Row(
-                        children: [
-                          const Icon(Icons.location_on, color: Colors.blue),
-                          const SizedBox(width: 8),
-                          const Text('Penangkapan Lokasi', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
-                          const Spacer(),
-                          Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                            decoration: BoxDecoration(
-                              color: _bgLocationService.isTracking ? Colors.green.shade100 : Colors.grey.shade200,
-                              borderRadius: BorderRadius.circular(12),
-                            ),
-                            child: Row(
-                              children: [
-                                Icon(Icons.circle, size: 8, color: _bgLocationService.isTracking ? Colors.green : Colors.grey),
-                                const SizedBox(width: 4),
-                                Text(_bgLocationService.isTracking ? 'Live' : 'Off', style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: _bgLocationService.isTracking ? Colors.green : Colors.grey)),
-                              ],
-                            ),
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 10),
-                      if (_progress > 0) LinearProgressIndicator(value: _progress),
-                      const SizedBox(height: 10),
-                      Container(
-                        padding: const EdgeInsets.all(12),
-                        decoration: BoxDecoration(color: Colors.blue.shade50, borderRadius: BorderRadius.circular(8)),
+                      Icon(Icons.satellite_alt, color: _gpsColor, size: 36),
+                      const SizedBox(width: 12),
+                      Expanded(
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            const Row(children: [Icon(Icons.info_outline, size: 16, color: Colors.blue), SizedBox(width: 4), Text('Status Real-time', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12))]),
-                            const SizedBox(height: 8),
-                            Text(_accuracyText, style: const TextStyle(fontSize: 12)),
-                            Text(_currentLocationText, style: const TextStyle(fontSize: 12)),
-                            Text(_samplesInfo, style: const TextStyle(fontSize: 12)),
-                            if (_averagedPosition != null) Text(_locationNameStatus, style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Colors.green)),
+                            Text(_gpsStatusText, style: TextStyle(fontWeight: FontWeight.bold, color: _gpsColor, fontSize: 16)),
+                            if (_finalPosition != null)
+                              Text("Lat: ${_finalPosition!.latitude.toStringAsFixed(6)}\nLng: ${_finalPosition!.longitude.toStringAsFixed(6)}", style: const TextStyle(fontSize: 12)),
+                            Text("Sinyal Mentah: ${_currentRawAccuracy.toStringAsFixed(1)}m", style: const TextStyle(fontSize: 10, color: Colors.grey)),
                           ],
                         ),
                       ),
-                      const SizedBox(height: 10),
-                      SizedBox(
-                        width: double.infinity,
-                        child: ElevatedButton.icon(
-                          onPressed: _isCapturingLocation ? null : _captureLocation,
-                          icon: Icon(_isCapturingLocation ? Icons.hourglass_empty : Icons.my_location),
-                          label: Text(_isCapturingLocation ? 'Memproses...' : 'Gunakan Lokasi Terkini'),
-                          style: ElevatedButton.styleFrom(padding: const EdgeInsets.symmetric(vertical: 12), backgroundColor: Colors.blue, foregroundColor: Colors.white),
-                        ),
-                      ),
+                      // Tombol Kunci Manual
+                      IconButton(
+                        onPressed: _toggleLock,
+                        icon: Icon(_isLocked ? Icons.lock : Icons.lock_open, color: _isLocked ? Colors.blue : Colors.grey, size: 30),
+                        tooltip: _isLocked ? "Buka Kunci (Cari Ulang)" : "Kunci Posisi Ini",
+                      )
                     ],
                   ),
                 ),
               ),
+              const SizedBox(height: 16),
 
-              const SizedBox(height: 20),
-
-              // Data Input Section
-              Card(
-                child: Padding(
-                  padding: const EdgeInsets.all(16.0),
-                  child: Column(
-                    children: [
-                      const Text('Input Data', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
-                      const SizedBox(height: 10),
-
-                      // Lokasi Dropdown (Dynamic)
-                      DropdownButtonFormField<String>(
-                        value: _selectedLocation,
-                        decoration: const InputDecoration(labelText: 'Nama Lokasi'),
-                        items: _locations.map((loc) => DropdownMenuItem(value: loc, child: Text(loc))).toList(),
-                        onChanged: (value) => setState(() => _selectedLocation = value!),
-                        validator: (value) => value == null ? 'Harap pilih lokasi' : null,
-                      ),
-
-                      const SizedBox(height: 10),
-
-                      // Jenis Pohon Dropdown (Dynamic)
-                      DropdownButtonFormField<String>(
-                        value: _itemType,
-                        decoration: const InputDecoration(labelText: 'Jenis Pohon'),
-                        isExpanded: true, // Agar teks panjang tidak overflow
-                        items: _treeTypes.map((type) => DropdownMenuItem(value: type, child: Text(type, overflow: TextOverflow.ellipsis))).toList(),
-                        onChanged: (value) => setState(() => _itemType = value!),
-                        validator: (value) => value == null ? 'Harap pilih jenis pohon' : null,
-                      ),
-
-                      const SizedBox(height: 10),
-
-                      // Condition Dropdown
-                      DropdownButtonFormField<String>(
-                        value: _condition,
-                        decoration: const InputDecoration(labelText: 'Kondisi'),
-                        items: _conditions.map((condition) => DropdownMenuItem(value: condition, child: Text(condition))).toList(),
-                        onChanged: (value) => setState(() => _condition = value!),
-                        validator: (value) => value == null ? 'Harap pilih kondisi' : null,
-                      ),
-
-                      const SizedBox(height: 10),
-
-                      // Details Text Field
-                      TextFormField(
-                        controller: _detailsController,
-                        decoration: const InputDecoration(labelText: 'Detail'),
-                        maxLines: 3,
-                        validator: (value) => value!.isEmpty ? 'Harap masukkan detail' : null,
-                      ),
-
-                      const SizedBox(height: 10),
-
-                      // Photo Button
-                      ElevatedButton.icon(
-                        onPressed: _takePhoto,
-                        icon: const Icon(Icons.camera),
-                        label: const Text('Ambil Foto'),
-                      ),
-
-                      if (_photoPath != null)
-                        Padding(
-                          padding: const EdgeInsets.only(top: 10),
-                          child: Text('Foto diambil: ${_photoPath!.split('/').last}'),
-                        ),
-                    ],
-                  ),
-                ),
+              // --- FORM INPUT ---
+              DropdownButtonFormField<String>(
+                value: _selectedLocation,
+                isExpanded: true,
+                decoration: const InputDecoration(labelText: 'Lokasi / Blok', border: OutlineInputBorder()),
+                items: _locations.map((e) => DropdownMenuItem(value: e, child: Text(e))).toList(),
+                onChanged: (v) => setState(() => _selectedLocation = v),
+                validator: (v) => v == null ? 'Wajib diisi' : null,
               ),
+              const SizedBox(height: 12),
+              
+              DropdownButtonFormField<String>(
+                value: _itemType,
+                isExpanded: true,
+                decoration: const InputDecoration(labelText: 'Jenis Pohon', border: OutlineInputBorder()),
+                items: _treeTypes.map((e) => DropdownMenuItem(value: e, child: Text(e, overflow: TextOverflow.ellipsis))).toList(),
+                onChanged: (v) => setState(() => _itemType = v),
+                validator: (v) => v == null ? 'Wajib diisi' : null,
+              ),
+              const SizedBox(height: 12),
 
-              const SizedBox(height: 20),
+              Row(
+                children: [
+                  Expanded(
+                    child: DropdownButtonFormField<String>(
+                      value: _condition,
+                      decoration: const InputDecoration(labelText: 'Kondisi', border: OutlineInputBorder()),
+                      items: _conditions.map((e) => DropdownMenuItem(value: e, child: Text(e))).toList(),
+                      onChanged: (v) => setState(() { if (v != null) _condition = v; }),
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: TextFormField(
+                      controller: _detailsController,
+                      decoration: const InputDecoration(labelText: 'Detail/Ket', border: OutlineInputBorder()),
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 16),
 
-              // Save Button
-              SizedBox(
-                width: double.infinity,
-                child: ElevatedButton(
-                  onPressed: _saveGeotag,
-                  style: ElevatedButton.styleFrom(padding: const EdgeInsets.symmetric(vertical: 16)),
-                  child: const Text('Simpan Geotag', style: TextStyle(fontSize: 18)),
+              // --- TOMBOL AKSI ---
+              Row(
+                children: [
+                  Expanded(
+                    child: ElevatedButton.icon(
+                      // Hanya bisa foto jika sudah dapat koordinat
+                      onPressed: _finalPosition == null ? null : _takePhoto,
+                      icon: const Icon(Icons.camera_alt),
+                      label: Text(_photoPath == null ? 'Ambil Foto' : 'Foto Ulang'),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: _photoPath == null ? Colors.blue : Colors.orange,
+                        foregroundColor: Colors.white,
+                        padding: const EdgeInsets.symmetric(vertical: 16),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+              
+              if (_photoPath != null)
+                Padding(
+                  padding: const EdgeInsets.only(top: 8, bottom: 8),
+                  child: Text("✅ Foto tersimpan: ...${_photoPath!.split('/').last}", 
+                    style: const TextStyle(color: Colors.green, fontWeight: FontWeight.bold), textAlign: TextAlign.center),
+                ),
+
+              const SizedBox(height: 16),
+
+              ElevatedButton.icon(
+                // Tombol simpan hanya aktif jika lokasi & foto (opsional) ada
+                onPressed: (_finalPosition != null) ? _saveData : null,
+                icon: const Icon(Icons.save),
+                label: const Text('SIMPAN DATA'),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: Colors.green.shade700,
+                  foregroundColor: Colors.white,
+                  padding: const EdgeInsets.symmetric(vertical: 16),
+                  textStyle: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
                 ),
               ),
             ],
