@@ -1,35 +1,53 @@
 <?php
-// admin.php - Dashboard Admin SeedLoc (Full Recode: Enhanced CRUD Project & UI + Admin CRUD)
+// admin.php - Dashboard Admin SeedLoc
+// Fix: Metadata dropdown update issue & Enhanced Map
 
 session_start();
 
 // --- 1. CONFIG & DATABASE CONNECTION ---
-$db_host = 'localhost';
-$db_name = 'seedlocm_apk';
-$db_user = 'seedlocm_ali';
-$db_pass = 'alialiali123!';
-$dsn = "mysql:host=$db_host;dbname=$db_name;charset=utf8mb4";
-$photo_base_url = 'https://seedloc.my.id/api/';
-$upload_dir = __DIR__ . '/../api/uploads/'; 
+$db_file = __DIR__ . '/../api/db.php';
+$conn = null;
 
-try {
-    $pdo = new PDO($dsn, $db_user, $db_pass, [
-        PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
-        PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC
-    ]);
-} catch (PDOException $e) {
-    die("<h3>Database Error:</h3> " . htmlspecialchars($e->getMessage()));
+// Coba koneksi otomatis via api/db.php
+if (file_exists($db_file)) {
+    require_once $db_file;
+    try {
+        $database = new Database();
+        $pdo = $database->getConnection();
+    } catch (Exception $e) { $manual_connect = true; }
+} else { $manual_connect = true; }
+
+// Fallback koneksi manual
+if (isset($manual_connect)) {
+    $db_host = 'localhost';
+    $db_name = 'seedlocm_apk'; 
+    $db_user = 'seedlocm_ali'; 
+    $db_pass = 'alialiali123!'; 
+    $dsn = "mysql:host=$db_host;dbname=$db_name;charset=utf8mb4";
+    try {
+        $pdo = new PDO($dsn, $db_user, $db_pass, [
+            PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
+            PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC
+        ]);
+    } catch (PDOException $e) { die("<h3>Database Error:</h3> " . htmlspecialchars($e->getMessage())); }
 }
 
-// --- 2. LOAD METADATA (Untuk Dropdown) ---
-$metadata_path = __DIR__ . '/../api/metadata.php';
-if (file_exists($metadata_path)) {
+$photo_base_url = 'https://seedloc.my.id/api/'; 
+$upload_dir = __DIR__ . '/../api/uploads/'; 
+
+// --- 2. LOAD METADATA (FIXED) ---
+// Memastikan path absolut yang benar
+$metadata_path = realpath(__DIR__ . '/api/metadata.php');
+
+if ($metadata_path && file_exists($metadata_path)) {
     $metadata = require $metadata_path;
-    $tree_types = $metadata['treeTypes'];
-    $locations_list = $metadata['locations'];
+    $tree_types = $metadata['treeTypes'] ?? [];
+    $locations_list = $metadata['locations'] ?? [];
 } else {
-    $tree_types = ['Lainnya'];
-    $locations_list = ['Lainnya'];
+    // Jika file tidak ditemukan, gunakan array kosong atau error handling
+    // Jangan gunakan hardcode agar ketahuan jika file gagal load
+    $tree_types = ['Metadata File Not Found'];
+    $locations_list = ['Metadata File Not Found'];
 }
 
 // --- 3. HELPER FUNCTIONS ---
@@ -38,55 +56,57 @@ function get_photo_url($path, $base) {
     return (strpos($path, 'http') === 0) ? $path : $base . $path;
 }
 
-// Fungsi Export Data (ZIP, CSV, KML)
-function export_data($pdo, $ids, $type, $base_url, $upload_dir) {
-    if(empty($ids)) return;
-    $ph = implode(',', array_fill(0, count($ids), '?'));
-    
-    // Hanya export dari Geotags
-    $stmt = $pdo->prepare("SELECT * FROM geotags WHERE id IN ($ph) ORDER BY id DESC");
-    $stmt->execute($ids);
+function export_data($pdo, $ids, $type, $base_url, $upload_dir, $full_project_id = null) {
+    if ($full_project_id) {
+        $sql = ($full_project_id === 'all') ? "SELECT * FROM geotags ORDER BY id DESC" : "SELECT * FROM geotags WHERE projectId = ? ORDER BY id DESC";
+        $params = ($full_project_id === 'all') ? [] : [$full_project_id];
+        $filename_prefix = ($full_project_id === 'all') ? "All_Data_" : "Project_{$full_project_id}_";
+    } else {
+        if(empty($ids)) return;
+        $ph = implode(',', array_fill(0, count($ids), '?'));
+        $sql = "SELECT * FROM geotags WHERE id IN ($ph) ORDER BY id DESC";
+        $params = $ids;
+        $filename_prefix = "Selected_";
+    }
+
+    $stmt = $pdo->prepare($sql);
+    $stmt->execute($params);
 
     if ($type === 'download_zip') {
         if (!class_exists('ZipArchive')) { $_SESSION['swal_error'] = "ZipArchive extension missing."; return; }
         $zip = new ZipArchive();
-        $zipName = 'photos_' . date('Ymd_His') . '.zip';
+        $zipName = $filename_prefix . 'Photos_' . date('Ymd_His') . '.zip';
         $tempZip = tempnam(sys_get_temp_dir(), 'zip');
         if ($zip->open($tempZip, ZipArchive::CREATE) !== TRUE) return;
 
         $count = 0;
         while($r = $stmt->fetch()) {
-            $p = $r['photoPath'];
-            if (empty($p)) continue;
+            $p = $r['photoPath']; if (empty($p)) continue;
             $cleanType = preg_replace('/[^A-Za-z0-9]/', '_', $r['itemType']);
             $zipInternalName = $r['id'] . '_' . $cleanType . '.jpg';
-
             if (strpos($p, 'http') === 0) {
-                $content = @file_get_contents($p);
-                if ($content) { $zip->addFromString($zipInternalName, $content); $count++; }
+                $content = @file_get_contents($p); if ($content) { $zip->addFromString($zipInternalName, $content); $count++; }
             } else {
-                $filePath = $upload_dir . basename($p);
-                if (file_exists($filePath)) { $zip->addFile($filePath, $zipInternalName); $count++; }
+                $filePath = $upload_dir . basename($p); if (file_exists($filePath)) { $zip->addFile($filePath, $zipInternalName); $count++; }
             }
         }
         $zip->close();
         if ($count > 0) {
             header('Content-Type: application/zip'); header('Content-disposition: attachment; filename='.$zipName);
             header('Content-Length: ' . filesize($tempZip)); readfile($tempZip); unlink($tempZip); exit;
-        } else { $_SESSION['swal_warning'] = "Tidak ada foto yang valid untuk diunduh."; unlink($tempZip); return; }
+        } else { $_SESSION['swal_warning'] = "Tidak ada foto valid."; unlink($tempZip); if(!$full_project_id) header("Location: ?action=list&table=geotags"); return; }
 
     } elseif ($type === 'csv') {
-        header('Content-Type: text/csv'); header('Content-Disposition: attachment; filename="export_geotags_'.date('YmdHis').'.csv"');
+        header('Content-Type: text/csv'); header('Content-Disposition: attachment; filename="'.$filename_prefix.'Data_'.date('YmdHis').'.csv"');
         $out = fopen('php://output', 'w');
         fputcsv($out, ['ID', 'ProjectID', 'Lat', 'Lng', 'Location', 'Time', 'Type', 'Condition', 'Details', 'PhotoURL']);
         while($r = $stmt->fetch()) {
-            $r['photoPath'] = get_photo_url($r['photoPath'], $base_url);
-            fputcsv($out, $r);
+            fputcsv($out, [$r['id'], $r['projectId'], $r['latitude'], $r['longitude'], $r['locationName'], $r['timestamp'], $r['itemType'], $r['condition'], $r['details'], get_photo_url($r['photoPath'], $base_url)]);
         }
         fclose($out); exit;
 
     } elseif ($type === 'kml') {
-        header('Content-Type: application/vnd.google-earth.kml+xml'); header('Content-Disposition: attachment; filename="export_'.date('YmdHis').'.kml"');
+        header('Content-Type: application/vnd.google-earth.kml+xml'); header('Content-Disposition: attachment; filename="'.$filename_prefix.'Map_'.date('YmdHis').'.kml"');
         echo '<?xml version="1.0" encoding="UTF-8"?><kml xmlns="http://www.opengis.net/kml/2.2"><Document>';
         while($r = $stmt->fetch()) {
             $img = get_photo_url($r['photoPath'], $base_url);
@@ -98,28 +118,29 @@ function export_data($pdo, $ids, $type, $base_url, $upload_dir) {
     }
 }
 
-// --- 4. AUTHENTICATION & SECURITY ---
+// --- 4. AUTHENTICATION ---
 if (isset($_SESSION['auth']) && $_SESSION['auth'] === true) {
-    if (isset($_SESSION['auth_time']) && (time() - $_SESSION['auth_time'] > 3600)) {
-        session_unset(); session_destroy(); header('Location: ?action=login&timeout=1'); exit;
-    }
+    if (isset($_SESSION['auth_time']) && (time() - $_SESSION['auth_time'] > 7200)) { session_unset(); session_destroy(); header('Location: ?action=login&timeout=1'); exit; }
     $_SESSION['auth_time'] = time();
 }
 if (!isset($_SESSION['csrf_token'])) $_SESSION['csrf_token'] = bin2hex(random_bytes(32));
-
 function require_auth() { if (!isset($_SESSION['auth']) || !$_SESSION['auth']) { header('Location: ?action=login'); exit; } }
 
-// --- 5. CONTROLLER (LOGIC) ---
+// --- 5. CONTROLLER ---
 $action = $_GET['action'] ?? 'dashboard';
 $table = $_GET['table'] ?? 'geotags'; 
 $pk = ($table === 'projects') ? 'projectId' : 'id'; 
 
-// Login Handler
+if ($action === 'export_full') {
+    require_auth();
+    $pid = $_GET['projectId'] ?? 'all'; $type = $_GET['type'] ?? 'csv';
+    if (in_array($type, ['csv', 'download_zip', 'kml'])) export_data($pdo, [], $type, $photo_base_url, $upload_dir, $pid);
+    else { $_SESSION['swal_error'] = "Parameter salah."; header("Location: ?action=list&table=geotags"); exit; }
+}
+
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['login'])) {
-    $stmt = $pdo->prepare("SELECT * FROM admin_users WHERE username = ?");
-    $stmt->execute([$_POST['username'] ?? '']);
-    $user = $stmt->fetch();
-    if ($user && password_verify($_POST['password'] ?? '', $user['password_hash'])) {
+    $stmt = $pdo->prepare("SELECT * FROM admin_users WHERE username = ?"); $stmt->execute([$_POST['username']??'']); $user = $stmt->fetch();
+    if ($user && password_verify($_POST['password']??'', $user['password_hash'])) {
         $_SESSION['auth'] = true; $_SESSION['auth_time'] = time();
         $_SESSION['admin_id'] = $user['id']; $_SESSION['admin_username'] = $user['username'];
         $_SESSION['swal_success'] = "Login Berhasil"; header('Location: admin.php'); exit;
@@ -129,22 +150,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['login'])) {
 if ($action === 'logout') { session_destroy(); header('Location: ?action=login'); exit; }
 if ($action !== 'login') require_auth();
 
-// POST Handler (CRUD & Bulk Actions)
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['csrf_token'])) {
     if (!hash_equals($_SESSION['csrf_token'], $_POST['csrf_token'])) die('CSRF Validation Failed');
     
-    // --- CREATE & UPDATE ---
     if (isset($_POST['update']) || isset($_POST['create'])) {
         try {
             $id = $_POST[$pk] ?? null; 
-            
             if ($table == 'projects') {
-                // CRUD PROJECT
                 if (isset($_POST['create'])) {
-                    $check = $pdo->prepare("SELECT COUNT(*) FROM projects WHERE projectId = ?");
-                    $check->execute([$_POST['projectId']]);
-                    if($check->fetchColumn() > 0) throw new Exception("Project ID {$_POST['projectId']} sudah ada!");
-
+                    $check = $pdo->prepare("SELECT COUNT(*) FROM projects WHERE projectId = ?"); $check->execute([$_POST['projectId']]);
+                    if($check->fetchColumn() > 0) throw new Exception("Project ID sudah ada!");
                     $sql = "INSERT INTO projects (projectId, activityName, locationName, officers, status) VALUES (?,?,?,?,?)";
                     $params = [$_POST['projectId'], $_POST['activityName'], $_POST['locationName'], $_POST['officers'], $_POST['status']];
                 } else {
@@ -154,43 +169,24 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['csrf_token'])) {
                 $pdo->prepare($sql)->execute($params);
 
             } elseif ($table == 'admin_users') {
-                // --- CRUD ADMIN USERS (BARU) ---
-                $username = trim($_POST['username']);
-                $role = $_POST['role'];
-
+                $username = trim($_POST['username']); $role = $_POST['role'];
                 if (isset($_POST['create'])) {
-                    // Create Admin Baru
-                    if(empty($_POST['password'])) throw new Exception("Password wajib diisi untuk user baru!");
-                    
-                    // Cek username kembar
-                    $check = $pdo->prepare("SELECT COUNT(*) FROM admin_users WHERE username = ?");
-                    $check->execute([$username]);
-                    if($check->fetchColumn() > 0) throw new Exception("Username '$username' sudah digunakan!");
-
+                    if(empty($_POST['password'])) throw new Exception("Password wajib diisi!");
+                    $check = $pdo->prepare("SELECT COUNT(*) FROM admin_users WHERE username = ?"); $check->execute([$username]);
+                    if($check->fetchColumn() > 0) throw new Exception("Username sudah digunakan!");
                     $hash = password_hash($_POST['password'], PASSWORD_DEFAULT);
-                    $stmt = $pdo->prepare("INSERT INTO admin_users (username, password_hash, role) VALUES (?, ?, ?)");
-                    $stmt->execute([$username, $hash, $role]);
-
+                    $pdo->prepare("INSERT INTO admin_users (username, password_hash, role) VALUES (?, ?, ?)")->execute([$username, $hash, $role]);
                 } else {
-                    // Update Admin
                     if (!empty($_POST['password'])) {
-                        // Jika password diisi, update password
                         $hash = password_hash($_POST['password'], PASSWORD_DEFAULT);
-                        $stmt = $pdo->prepare("UPDATE admin_users SET username=?, role=?, password_hash=? WHERE id=?");
-                        $stmt->execute([$username, $role, $hash, $id]);
+                        $pdo->prepare("UPDATE admin_users SET username=?, role=?, password_hash=? WHERE id=?")->execute([$username, $role, $hash, $id]);
                     } else {
-                        // Jika kosong, hanya update data lain
-                        $stmt = $pdo->prepare("UPDATE admin_users SET username=?, role=? WHERE id=?");
-                        $stmt->execute([$username, $role, $id]);
+                        $pdo->prepare("UPDATE admin_users SET username=?, role=? WHERE id=?")->execute([$username, $role, $id]);
                     }
                 }
-                
-                $_SESSION['swal_success'] = "Data Admin berhasil disimpan";
-                header("Location: ?action=users"); exit; 
-                // Redirect khusus kembali ke halaman users
+                $_SESSION['swal_success'] = "Data Admin berhasil disimpan"; header("Location: ?action=users"); exit; 
 
             } elseif ($table == 'geotags') {
-                // CRUD GEOTAGS
                 $sql = isset($_POST['create']) 
                     ? "INSERT INTO geotags (itemType, `condition`, details, locationName, latitude, longitude, isSynced, projectId) VALUES (?,?,?,?,?,?,?,?)"
                     : "UPDATE geotags SET itemType=?, `condition`=?, details=?, locationName=?, latitude=?, longitude=?, isSynced=? WHERE id=?";
@@ -198,85 +194,48 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['csrf_token'])) {
                 if(isset($_POST['create'])) $params[] = $_POST['projectId']??0; else $params[] = $id;
                 $pdo->prepare($sql)->execute($params);
             }
-
             $_SESSION['swal_success'] = "Data berhasil disimpan"; 
             if($table != 'admin_users') { header("Location: ?action=list&table=$table"); exit; }
-
-        } catch(Exception $e) { 
-            $_SESSION['swal_error'] = $e->getMessage(); 
-        }
+        } catch(Exception $e) { $_SESSION['swal_error'] = $e->getMessage(); }
     }
 
-    // --- DELETE SINGLE ---
     if (isset($_POST['delete'])) {
         try {
             $id_to_delete = $_POST['delete_id'];
-
-            // Cek jika menghapus admin
-            if ($table == 'admin_users') {
-                if ($id_to_delete == $_SESSION['admin_id']) {
-                    throw new Exception("Anda tidak dapat menghapus akun Anda sendiri!");
-                }
-            }
-
-            if($table=='geotags'){
-                $r=$pdo->query("SELECT photoPath FROM geotags WHERE id=$id_to_delete")->fetch();
-                if ($r) {
-                    $p=$upload_dir.basename($r['photoPath']); 
-                    if(file_exists($p)) @unlink($p);
-                }
-            }
-            
+            if ($table == 'admin_users' && $id_to_delete == $_SESSION['admin_id']) throw new Exception("Tidak bisa menghapus diri sendiri!");
+            if($table=='geotags'){ $r=$pdo->query("SELECT photoPath FROM geotags WHERE id=$id_to_delete")->fetch(); if($r['photoPath']) @unlink($upload_dir.basename($r['photoPath'])); }
+            if($table=='projects'){ $ps=$pdo->prepare("SELECT photoPath FROM geotags WHERE projectId=?"); $ps->execute([$id_to_delete]); while($ph=$ps->fetch()) @unlink($upload_dir.basename($ph['photoPath'])); $pdo->prepare("DELETE FROM geotags WHERE projectId = ?")->execute([$id_to_delete]); }
             $pdo->prepare("DELETE FROM `$table` WHERE `$pk` = ?")->execute([$id_to_delete]);
-            $_SESSION['swal_success'] = "Data berhasil dihapus"; 
-            
-            if ($table == 'admin_users') { header("Location: ?action=users"); exit; }
-            else { header("Location: ?action=list&table=$table"); exit; }
-
-        } catch(Exception $e) {
-            $_SESSION['swal_error'] = $e->getMessage();
-        }
+            $_SESSION['swal_success'] = "Data berhasil dihapus"; header("Location: ?action=".($table=='admin_users'?'users':"list&table=$table")); exit;
+        } catch(Exception $e) { $_SESSION['swal_error'] = $e->getMessage(); }
     }
 
-    // --- BULK ACTIONS ---
     if (isset($_POST['bulk_action'])) {
-        $ids = $_POST['selected_ids'] ?? [];
-        $type = $_POST['bulk_action_type'] ?? '';
+        $ids = $_POST['selected_ids'] ?? []; $type = $_POST['bulk_action_type'] ?? '';
         if (!empty($ids)) {
             if ($type == 'download_zip' && $table == 'geotags') export_data($pdo, $ids, 'download_zip', $photo_base_url, $upload_dir);
             elseif ($type == 'export_csv' && $table == 'geotags') export_data($pdo, $ids, 'csv', $photo_base_url, $upload_dir);
             elseif ($type == 'export_kml' && $table == 'geotags') export_data($pdo, $ids, 'kml', $photo_base_url, $upload_dir);
             elseif ($type == 'delete_selected') {
                 $ph = implode(',', array_fill(0, count($ids), '?'));
-                if($table=='geotags'){
-                    $f=$pdo->prepare("SELECT photoPath FROM geotags WHERE id IN ($ph)"); $f->execute($ids);
-                    while($r=$f->fetch()){ $p=$upload_dir.basename($r['photoPath']); if(file_exists($p)) @unlink($p); }
-                }
+                if($table=='geotags'){ $f=$pdo->prepare("SELECT photoPath FROM geotags WHERE id IN ($ph)"); $f->execute($ids); while($r=$f->fetch()) if($r['photoPath']) @unlink($upload_dir.basename($r['photoPath'])); }
                 $pdo->prepare("DELETE FROM `$table` WHERE `$pk` IN ($ph)")->execute($ids);
                 $_SESSION['swal_success'] = count($ids) . " data dihapus"; header("Location: ?action=list&table=$table"); exit;
             } elseif ($type == 'mark_synced' && $table == 'geotags') {
-                $ph = implode(',', array_fill(0, count($ids), '?'));
-                $pdo->prepare("UPDATE geotags SET isSynced = 1 WHERE id IN ($ph)")->execute($ids);
+                $ph = implode(',', array_fill(0, count($ids), '?')); $pdo->prepare("UPDATE geotags SET isSynced = 1 WHERE id IN ($ph)")->execute($ids);
                 $_SESSION['swal_success'] = "Sync status diperbarui"; header("Location: ?action=list&table=$table"); exit;
             }
-        } else {
-            $_SESSION['swal_warning'] = "Tidak ada item yang dipilih";
         }
     }
 }
 
-// --- 6. DATA PREPARATION FOR VIEW ---
+// --- 6. VIEW HELPERS ---
 function buildWhere($table, $pdo) {
     $where = []; $p = [];
     if (!empty($_GET['search'])) { 
-        if ($table == 'geotags') { 
-            $where[] = "(itemType LIKE ? OR locationName LIKE ?)"; $p[] = "%{$_GET['search']}%"; $p[] = "%{$_GET['search']}%"; 
-        } elseif ($table == 'projects') {
-            $where[] = "(activityName LIKE ? OR locationName LIKE ? OR officers LIKE ?)"; 
-            $p[] = "%{$_GET['search']}%"; $p[] = "%{$_GET['search']}%"; $p[] = "%{$_GET['search']}%";
-        }
+        if ($table == 'geotags') { $where[] = "(itemType LIKE ? OR locationName LIKE ?)"; $p[] = "%{$_GET['search']}%"; $p[] = "%{$_GET['search']}%"; } 
+        elseif ($table == 'projects') { $where[] = "(activityName LIKE ? OR locationName LIKE ? OR officers LIKE ?)"; $p[] = "%{$_GET['search']}%"; $p[] = "%{$_GET['search']}%"; $p[] = "%{$_GET['search']}%"; }
     }
-    // Filter Geotag Spesifik
     if ($table == 'geotags') {
         if (!empty($_GET['condition']) && $_GET['condition'] != 'all') { $where[] = "`condition`=?"; $p[] = $_GET['condition']; }
         if (!empty($_GET['projectId']) && $_GET['projectId'] != 'all') { $where[] = "projectId=?"; $p[] = $_GET['projectId']; }
@@ -293,30 +252,25 @@ if ($action === 'dashboard') {
     $stats['daily'] = $pdo->query("SELECT DATE(timestamp), COUNT(*) FROM geotags WHERE timestamp >= DATE(NOW()) - INTERVAL 7 DAY GROUP BY DATE(timestamp)")->fetchAll(PDO::FETCH_KEY_PAIR);
 }
 
-$list_data = []; $page = (int)($_GET['page'] ?? 1); $per_page = 20; $total_pages = 1;
-if ($page < 1) $page = 1;
+$list_data = []; $page = (int)($_GET['page'] ?? 1); $per_page = 20; $total_pages = 1; if ($page < 1) $page = 1;
 
-// Fetch List Data
 if (in_array($action, ['list', 'gallery', 'map', 'users'])) {
     if ($action == 'users') { 
         $list_data = $pdo->query("SELECT * FROM admin_users ORDER BY id DESC")->fetchAll(); 
     } elseif ($action == 'map') {
+        // MAP VIEW: Fetch FULL DATA
         list($where, $p) = buildWhere('geotags', $pdo);
-        $sql = "SELECT id, latitude, longitude, itemType, `condition`, photoPath, locationName FROM geotags " . ($where ? "WHERE ".implode(' AND ', $where) : "");
+        $sql = "SELECT id, latitude, longitude, itemType, `condition`, photoPath, locationName FROM geotags " . ($where ? "WHERE ".implode(' AND ', $where) : "") . " ORDER BY id DESC";
         $stmt = $pdo->prepare($sql); $stmt->execute($p); $map_data = $stmt->fetchAll();
     } else {
-        // List View (Projects / Geotags)
         list($where, $p) = buildWhere($table, $pdo);
         $w_sql = $where ? "WHERE ".implode(' AND ', $where) : "";
-        
         $total_stmt = $pdo->prepare("SELECT COUNT(*) FROM `$table` $w_sql"); $total_stmt->execute($p);
         $total_rows = $total_stmt->fetchColumn(); $total_pages = ceil($total_rows / $per_page);
         $offset = ($page - 1) * $per_page;
-        
         $stmt = $pdo->prepare("SELECT * FROM `$table` $w_sql ORDER BY `$pk` DESC LIMIT $per_page OFFSET $offset");
         $stmt->execute($p); $list_data = $stmt->fetchAll();
-        
-        if ($table == 'geotags') $projects_list = $pdo->query("SELECT projectId, activityName FROM projects")->fetchAll();
+        if ($table == 'geotags') $projects_list = $pdo->query("SELECT projectId, activityName FROM projects ORDER BY created_at DESC")->fetchAll();
     }
 }
 ?>
@@ -327,9 +281,14 @@ if (in_array($action, ['list', 'gallery', 'map', 'users'])) {
     <title>SeedLoc Admin Panel</title>
     <link rel="icon" href="https://seedloc.my.id/logo.png" type="image/png">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
-    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.4.1/dist/MarkerCluster.css" />
+    <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.4.1/dist/MarkerCluster.Default.css" />
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script src="https://unpkg.com/leaflet.markercluster@1.4.1/dist/leaflet.markercluster.js"></script>
+    
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
     <style>
         body{font-family:'Segoe UI', sans-serif;background:#f4f6f8;margin:0;display:flex;height:100vh;overflow:hidden;color:#333}
@@ -343,7 +302,7 @@ if (in_array($action, ['list', 'gallery', 'map', 'users'])) {
         .card{background:#fff;padding:20px;border-radius:10px;box-shadow:0 2px 5px rgba(0,0,0,0.05);margin-bottom:20px;border:1px solid #f0f0f0}
         .btn{padding:8px 14px;border:none;border-radius:6px;color:#fff;cursor:pointer;text-decoration:none;font-size:14px;display:inline-flex;align-items:center;gap:5px;font-weight:600;transition:opacity 0.2s}
         .btn:hover{opacity:0.9}
-        .btn-p{background:#2E7D32} .btn-d{background:#d32f2f} .btn-w{background:#f39c12} .btn-b{background:#2196f3}
+        .btn-p{background:#2E7D32} .btn-d{background:#d32f2f} .btn-w{background:#f39c12} .btn-b{background:#2196f3} .btn-i{background:#1565c0}
         table{width:100%;border-collapse:collapse;font-size:14px} 
         th{background:#f8f9fa;font-weight:600;color:#666;text-transform:uppercase;font-size:12px;letter-spacing:0.5px}
         th,td{padding:12px 15px;border-bottom:1px solid #eee;text-align:left;vertical-align:middle}
@@ -355,13 +314,13 @@ if (in_array($action, ['list', 'gallery', 'map', 'users'])) {
         .modal-content{max-width:90%;max-height:85%;border-radius:5px;box-shadow:0 0 20px rgba(0,0,0,0.5)}
         .status-badge{padding:4px 8px;border-radius:4px;font-size:11px;font-weight:bold;text-transform:uppercase}
         .status-Active{background:#e8f5e9;color:#2E7D32} .status-Completed{background:#e3f2fd;color:#1976d2}
+        .custom-div-icon div { width:100%; height:100%; border-radius:50%; border:2px solid white; box-shadow:0 0 3px black; }
         @media(max-width:768px){.sidebar{width:60px}.brand span,.nav span{display:none}.brand{justify-content:center;padding:15px}.nav a{justify-content:center;padding:15px}}
     </style>
 </head>
 <body>
 
 <?php 
-// SweetAlert Notifikasi
 if(isset($_SESSION['swal_success'])){ echo "<script>Swal.fire({icon:'success',title:'Berhasil',text:'{$_SESSION['swal_success']}',timer:1500,showConfirmButton:false});</script>"; unset($_SESSION['swal_success']); }
 if(isset($_SESSION['swal_error'])){ echo "<script>Swal.fire({icon:'error',title:'Gagal',text:'{$_SESSION['swal_error']}'});</script>"; unset($_SESSION['swal_error']); }
 if(isset($_SESSION['swal_warning'])){ echo "<script>Swal.fire({icon:'warning',title:'Perhatian',text:'{$_SESSION['swal_warning']}'});</script>"; unset($_SESSION['swal_warning']); }
@@ -425,10 +384,10 @@ if(isset($_SESSION['swal_warning'])){ echo "<script>Swal.fire({icon:'warning',ti
         </script>
 
     <?php elseif($action === 'map'): ?>
-        <div class="header"><h2>Peta Sebaran Real-time</h2></div>
+        <div class="header"><h2>Peta Sebaran Real-time (Full Data)</h2></div>
         <form class="filter-bar">
             <input type="hidden" name="action" value="map">
-            <select name="condition"><option value="all">Semua Kondisi</option><option value="Baik">Baik</option><option value="Rusak">Rusak</option><option value="Mati">Mati</option></select>
+            <select name="condition"><option value="all">Semua Kondisi</option><option value="Baik">Hidup</option><option value="Rusak">Merana</option><option value="Mati">Mati</option></select>
             <div style="display:flex;align-items:center;gap:5px;"><input type="date" name="start_date"> <span>s/d</span> <input type="date" name="end_date"></div>
             <button class="btn btn-p">Filter</button> <a href="?action=map" class="btn btn-d">Reset</a>
         </form>
@@ -437,30 +396,44 @@ if(isset($_SESSION['swal_warning'])){ echo "<script>Swal.fire({icon:'warning',ti
         </div>
         <script>
             var m = L.map('map').setView([-6.2, 106.8], 5);
-            L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(m);
-            var pts = <?=json_encode($map_data)?>; var b=[];
+            var streets = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { attribution: '&copy; OpenStreetMap' });
+            var satellite = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', { attribution: '&copy; Esri' });
+            
+            m.addLayer(streets);
+            L.control.layers({ "Peta Jalan": streets, "Satelit": satellite }).addTo(m);
+
+            var markers = L.markerClusterGroup();
+            var pts = <?=json_encode($map_data)?>; 
+            var b=[];
+
             pts.forEach(p=>{
                 var lat=parseFloat(p.latitude),lng=parseFloat(p.longitude);
                 if(!isNaN(lat)){
-                    var c='#f39c12'; 
-                    if(p.condition=='Baik'||p.condition=='Hidup')c='#2E7D32'; 
-                    if(p.condition=='Mati'||p.condition=='Rusak'||p.condition=='Buruk')c='#d32f2f';
+                    var c='orange'; 
+                    if(p.condition=='Baik'||p.condition=='Hidup')c='green'; 
+                    else if(p.condition=='Mati'||p.condition=='Rusak'||p.condition=='Buruk')c='red';
+                    
+                    var icon = L.divIcon({
+                        className: 'custom-div-icon',
+                        html: `<div style="background-color:${c};"></div>`,
+                        iconSize: [12, 12], iconAnchor: [6, 6]
+                    });
+
                     var img=p.photoPath?(p.photoPath.startsWith('http')?p.photoPath:'<?=$photo_base_url?>'+p.photoPath):'';
-                    L.circleMarker([lat,lng],{radius:7,fillColor:c,color:"#fff",weight:2,opacity:1,fillOpacity:0.8}).addTo(m)
-                     .bindPopup(`<b>${p.itemType}</b><br><span style='color:${c}'>${p.condition}</span><br>${p.locationName}${img?'<br><img src="'+img+'" width="100%" style="margin-top:5px;border-radius:4px;">':''}`);
+                    var mkr = L.marker([lat,lng],{icon:icon});
+                    mkr.bindPopup(`<b>${p.itemType}</b><br><span style='color:${c}'>${p.condition}</span><br>${p.locationName}${img?'<br><img src="'+img+'" width="100%" style="margin-top:5px;border-radius:4px;">':''}`);
+                    markers.addLayer(mkr);
                     b.push([lat,lng]);
                 }
             });
-            if(b.length) m.fitBounds(b);
+            m.addLayer(markers);
+            if(b.length) m.fitBounds(b, {padding:[50,50]});
         </script>
 
     <?php elseif(in_array($action, ['list', 'users'])): ?>
         <div class="header">
             <h2 style="margin:0;">Data <?=ucfirst($table)?></h2>
-            
-            <a href="?action=create&table=<?=$action=='users'?'admin_users':$table?>" class="btn btn-p">
-                <i class="fas fa-plus-circle"></i> Tambah Data
-            </a>
+            <a href="?action=create&table=<?=$action=='users'?'admin_users':$table?>" class="btn btn-p"><i class="fas fa-plus-circle"></i> Tambah Data</a>
         </div>
 
         <?php if($action=='list'): ?>
@@ -469,11 +442,24 @@ if(isset($_SESSION['swal_warning'])){ echo "<script>Swal.fire({icon:'warning',ti
             <input type="text" name="search" placeholder="Cari data..." value="<?=htmlspecialchars($_GET['search']??'')?>" style="flex:1;">
             
             <?php if($table=='geotags'): ?>
-                <select name="projectId"><option value="all">Semua Project</option><?php foreach($projects_list as $p) echo "<option value='{$p['projectId']}'>{$p['activityName']}</option>"; ?></select>
+                <select name="projectId"><option value="all">Semua Project</option><?php foreach($projects_list as $p) echo "<option value='{$p['projectId']}' ".($_GET['projectId']??''==$p['projectId']?'selected':'').">{$p['activityName']}</option>"; ?></select>
                 <div style="display:flex;align-items:center;gap:5px;"><input type="date" name="start_date"> - <input type="date" name="end_date"></div>
             <?php endif; ?>
             
             <button class="btn btn-b"><i class="fas fa-search"></i> Cari</button> <a href="?action=list&table=<?=$table?>" class="btn btn-d"><i class="fas fa-sync"></i></a>
+
+            <?php if($table=='geotags'): ?>
+                <?php 
+                    $currProj = $_GET['projectId'] ?? 'all';
+                    $labelExport = ($currProj == 'all' || empty($currProj)) ? "SEMUA DATA" : "PROJECT #$currProj";
+                ?>
+                <div style="display:flex; gap:5px; align-items:center; background:#e8f5e9; padding:5px 10px; border-radius:6px; margin-left:auto;">
+                    <span style="font-size:11px; font-weight:bold; color:#2E7D32; text-transform:uppercase;">Export (<?=$labelExport?>):</span>
+                    <a href="?action=export_full&projectId=<?=$currProj?>&type=csv" target="_blank" class="btn btn-i" style="padding:4px 8px; font-size:11px;" title="CSV"><i class="fas fa-file-csv"></i> CSV</a>
+                    <a href="?action=export_full&projectId=<?=$currProj?>&type=download_zip" target="_blank" class="btn btn-w" style="padding:4px 8px; font-size:11px;" title="Foto ZIP"><i class="fas fa-file-archive"></i> ZIP</a>
+                    <a href="?action=export_full&projectId=<?=$currProj?>&type=kml" target="_blank" class="btn btn-b" style="padding:4px 8px; font-size:11px;" title="KML"><i class="fas fa-map"></i> KML</a>
+                </div>
+            <?php endif; ?>
         </form>
 
         <form method="post" id="bulkForm">
@@ -499,13 +485,11 @@ if(isset($_SESSION['swal_warning'])){ echo "<script>Swal.fire({icon:'warning',ti
                     <thead>
                         <tr>
                             <?php if($table=='geotags'): ?><th width="30"><input type="checkbox" onclick="toggle(this)"></th><?php endif; ?>
-                            
                             <?php if($table=='geotags'): ?>
                                 <th>Foto</th><th>ID</th><th>Jenis</th><th>Lokasi</th><th>Tanggal</th><th>Kondisi</th>
-                            <?php else: // PROJECTS ?>
+                            <?php else: ?>
                                 <th>ID</th><th>Nama Kegiatan</th><th>Lokasi Project</th><th>Petugas</th><th>Status</th>
                             <?php endif; ?>
-                            
                             <th style="text-align:right;">Aksi</th>
                         </tr>
                     </thead>
@@ -522,8 +506,16 @@ if(isset($_SESSION['swal_warning'])){ echo "<script>Swal.fire({icon:'warning',ti
                                 <td><b><?=$r['itemType']?></b></td>
                                 <td><?=$r['locationName']?></td>
                                 <td><?=substr($r['timestamp'],0,10)?></td>
-                                <td><span class="status-badge" style="<?=$r['condition']=='Baik'?'color:#2E7D32;background:#e8f5e9;':'color:#c62828;background:#ffebee;'?>"><?=$r['condition']?></span></td>
-                            <?php else: // PROJECTS ?>
+                                <td>
+                                    <span class="status-badge" style="<?= 
+                                        ($r['condition']=='Hidup' || $r['condition']=='Baik') ? 'color:#2E7D32;background:#e8f5e9;' : 
+                                        (($r['condition']=='Merana') ? 'color:#856404;background:#fff3cd;' : 
+                                        'color:#c62828;background:#ffebee;') 
+                                    ?>">
+                                        <?=$r['condition']?>
+                                    </span>
+                                </td>
+                            <?php else: ?>
                                 <td><b>#<?=$r['projectId']?></b></td>
                                 <td><?=$r['activityName']?></td>
                                 <td><i class="fas fa-map-marker-alt" style="color:#d32f2f;margin-right:5px;"></i> <?=$r['locationName']?></td>
@@ -572,7 +564,6 @@ if(isset($_SESSION['swal_warning'])){ echo "<script>Swal.fire({icon:'warning',ti
                     </tbody>
                 </table>
             </div>
-            
             <form method="post" id="delForm">
                 <input type="hidden" name="delete" value="1">
                 <input type="hidden" name="delete_id" id="delId">
@@ -617,14 +608,46 @@ if(isset($_SESSION['swal_warning'])){ echo "<script>Swal.fire({icon:'warning',ti
                     <input type="hidden" name="id" value="<?=$d['id']?>">
                     <div style="display:grid;grid-template-columns:1fr 1fr;gap:15px;margin-bottom:15px;">
                         <div><label>Project ID</label><input type="number" name="projectId" value="<?=$d['projectId']??''?>" style="width:100%;"></div>
-                        <div><label>Tipe Item</label><select name="itemType" style="width:100%;"><?php foreach($tree_types as $t) echo "<option value='$t' ".($d['itemType']==$t?'selected':'').">$t</option>"; ?></select></div>
+                        <div>
+                            <label>Tipe Item</label>
+                            <select name="itemType" style="width:100%;">
+                                <?php 
+                                // Logic: Tampilkan List Metadata + Value saat ini jika tidak ada di list
+                                $opts = $tree_types;
+                                if($is_edit && !in_array($d['itemType'], $opts)) array_unshift($opts, $d['itemType']);
+                                foreach($opts as $t) {
+                                    $sel = ($d['itemType'] == $t) ? 'selected' : '';
+                                    echo "<option value='".htmlspecialchars($t)."' $sel>".htmlspecialchars($t)."</option>"; 
+                                }
+                                ?>
+                            </select>
+                        </div>
                     </div>
-                    <div style="margin-bottom:15px;"><label>Lokasi</label><select name="locationName" style="width:100%;"><?php foreach($locations_list as $l) echo "<option value='$l' ".($d['locationName']==$l?'selected':'').">$l</option>"; ?></select></div>
+                    <div style="margin-bottom:15px;">
+                        <label>Lokasi</label>
+                        <select name="locationName" style="width:100%;">
+                            <?php 
+                            $locs = $locations_list;
+                            if($is_edit && !in_array($d['locationName'], $locs)) array_unshift($locs, $d['locationName']);
+                            foreach($locs as $l) {
+                                $sel = ($d['locationName'] == $l) ? 'selected' : '';
+                                echo "<option value='".htmlspecialchars($l)."' $sel>".htmlspecialchars($l)."</option>";
+                            }
+                            ?>
+                        </select>
+                    </div>
                     <div style="display:grid;grid-template-columns:1fr 1fr;gap:15px;margin-bottom:15px;">
                         <div><label>Lat</label><input type="text" name="latitude" value="<?=$d['latitude']??''?>" style="width:100%;"></div>
                         <div><label>Lng</label><input type="text" name="longitude" value="<?=$d['longitude']??''?>" style="width:100%;"></div>
                     </div>
-                    <div style="margin-bottom:15px;"><label>Kondisi</label><select name="condition" style="width:100%;"><option value="Baik" <?=($d['condition']=='Baik'?'selected':'')?>>Baik</option><option value="Rusak" <?=($d['condition']=='Rusak'?'selected':'')?>>Rusak</option></select></div>
+                    <div style="margin-bottom:15px;">
+                     <label>Kondisi</label>
+                      <select name="condition" style="width:100%;">
+                      <option value="Hidup" <?=($d['condition']=='Hidup'?'selected':'')?>>Hidup</option>
+                         <option value="Merana" <?=($d['condition']=='Merana'?'selected':'')?>>Merana</option>
+                        <option value="Mati" <?=($d['condition']=='Mati'?'selected':'')?>>Mati</option>
+                        </select>
+                    </div>
                     <div style="margin-bottom:15px;"><label>Detail</label><input type="text" name="details" value="<?=$d['details']??''?>" style="width:100%;"></div>
                     <div style="margin-bottom:15px;"><label>Sync Status</label><select name="isSynced" style="width:100%;"><option value="1">Sudah</option><option value="0">Belum</option></select></div>
 
@@ -633,7 +656,6 @@ if(isset($_SESSION['swal_warning'])){ echo "<script>Swal.fire({icon:'warning',ti
                         <label style="font-weight:600;display:block;margin-bottom:5px;">Username</label>
                         <input type="text" name="username" value="<?=$d['username']??''?>" style="width:100%;" required>
                     </div>
-                    
                     <div style="margin-bottom:15px;">
                         <label style="font-weight:600;display:block;margin-bottom:5px;">Role / Jabatan</label>
                         <select name="role" style="width:100%;">
@@ -641,7 +663,6 @@ if(isset($_SESSION['swal_warning'])){ echo "<script>Swal.fire({icon:'warning',ti
                             <option value="Viewer" <?=($d['role']??'')=='Viewer'?'selected':''?>>Viewer (Read Only)</option>
                         </select>
                     </div>
-
                     <div style="margin-bottom:15px;">
                         <label style="font-weight:600;display:block;margin-bottom:5px;">Password</label>
                         <input type="password" name="password" style="width:100%;" placeholder="<?=$is_edit ? 'Kosongkan jika tidak ingin mengubah password' : 'Masukkan password baru'?>" <?=$is_edit ? '' : 'required'?>>
@@ -652,24 +673,19 @@ if(isset($_SESSION['swal_warning'])){ echo "<script>Swal.fire({icon:'warning',ti
                     <div style="margin-bottom:15px;">
                         <label style="font-weight:600;display:block;margin-bottom:5px;">Project ID (Angka Unik)</label>
                         <input type="number" name="projectId" value="<?=$d['projectId']??''?>" style="width:100%;background:<?=$is_edit?'#eee':'#fff'?>" <?=$is_edit?'readonly':''?> required placeholder="Contoh: 101">
-                        <?php if($is_edit): ?><small style="color:#888;">ID tidak dapat diubah setelah dibuat.</small><?php endif; ?>
                     </div>
-                    
                     <div style="margin-bottom:15px;">
                         <label style="font-weight:600;display:block;margin-bottom:5px;">Nama Kegiatan</label>
                         <input type="text" name="activityName" value="<?=$d['activityName']??''?>" style="width:100%;" required placeholder="Contoh: Patroli Hutan Lindung">
                     </div>
-                    
                     <div style="margin-bottom:15px;">
                         <label style="font-weight:600;display:block;margin-bottom:5px;">Lokasi Kegiatan</label>
                         <input type="text" name="locationName" value="<?=$d['locationName']??''?>" style="width:100%;" required placeholder="Contoh: Blok A">
                     </div>
-                    
                     <div style="margin-bottom:15px;">
                         <label style="font-weight:600;display:block;margin-bottom:5px;">Petugas (Pisahkan dengan koma)</label>
                         <input type="text" name="officers" value="<?=$d['officers']??''?>" style="width:100%;" required placeholder="Contoh: Budi, Santoso">
                     </div>
-                    
                     <div style="margin-bottom:15px;">
                         <label style="font-weight:600;display:block;margin-bottom:5px;">Status</label>
                         <select name="status" style="width:100%;">
@@ -693,7 +709,6 @@ if(isset($_SESSION['swal_warning'])){ echo "<script>Swal.fire({icon:'warning',ti
 <script>
     function toggle(s){var c=document.querySelectorAll('input[name="selected_ids[]"]');for(var i=0;i<c.length;i++)c[i].checked=s.checked;}
     function showModal(s,c){document.getElementById('imgModal').style.display="flex";document.getElementById('modalImg').src=s;document.getElementById('modalCaption').innerHTML=c;}
-    
     function confirmBulk(){
         var s=document.querySelector('select[name="bulk_action_type"]');
         if(s.value==''){ Swal.fire('Pilih Aksi','Silakan pilih aksi massal terlebih dahulu.','info'); return; } 
@@ -701,9 +716,8 @@ if(isset($_SESSION['swal_warning'])){ echo "<script>Swal.fire({icon:'warning',ti
             if(r.isConfirmed) document.getElementById('realBulkBtn').click();
         });
     }
-
     function confirmDel(id){
-        Swal.fire({title:'Hapus Data?',text:'Data yang dihapus tidak dapat dikembalikan!',icon:'warning',showCancelButton:true,confirmButtonColor:'#d33',confirmButtonText:'Ya, Hapus!'}).then((r)=>{
+        Swal.fire({title:'Hapus Data?',text:'Data yang dihapus (beserta Fotonya) tidak dapat dikembalikan!',icon:'warning',showCancelButton:true,confirmButtonColor:'#d33',confirmButtonText:'Ya, Hapus!'}).then((r)=>{
             if(r.isConfirmed){
                 document.getElementById('delId').value = id;
                 document.getElementById('delForm').submit();
