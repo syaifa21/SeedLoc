@@ -249,7 +249,7 @@ function build_url($params = []) {
                 </a>
             </li>
             <li>
-                <a href="Dashboard/admin.php">
+                <a href="/admin.php">
                     <i class="fas fa-lock"></i> <span>Login Admin</span>
                 </a>
             </li>
