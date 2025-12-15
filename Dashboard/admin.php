@@ -1,6 +1,6 @@
 <?php
 // admin.php - Dashboard Admin SeedLoc
-// Fix: Metadata dropdown update issue & Enhanced Map
+// Fix: Added "View Detail" Popup, Map Persistence, Search & No Pagination for Geotags
 
 session_start();
 
@@ -8,7 +8,6 @@ session_start();
 $db_file = __DIR__ . '/../api/db.php';
 $conn = null;
 
-// Coba koneksi otomatis via api/db.php
 if (file_exists($db_file)) {
     require_once $db_file;
     try {
@@ -17,7 +16,6 @@ if (file_exists($db_file)) {
     } catch (Exception $e) { $manual_connect = true; }
 } else { $manual_connect = true; }
 
-// Fallback koneksi manual
 if (isset($manual_connect)) {
     $db_host = 'localhost';
     $db_name = 'seedlocm_apk'; 
@@ -35,17 +33,13 @@ if (isset($manual_connect)) {
 $photo_base_url = 'https://seedloc.my.id/api/'; 
 $upload_dir = __DIR__ . '/../api/uploads/'; 
 
-// --- 2. LOAD METADATA (FIXED) ---
-// Memastikan path absolut yang benar
+// --- 2. LOAD METADATA ---
 $metadata_path = realpath(__DIR__ . '/api/metadata.php');
-
 if ($metadata_path && file_exists($metadata_path)) {
     $metadata = require $metadata_path;
     $tree_types = $metadata['treeTypes'] ?? [];
     $locations_list = $metadata['locations'] ?? [];
 } else {
-    // Jika file tidak ditemukan, gunakan array kosong atau error handling
-    // Jangan gunakan hardcode agar ketahuan jika file gagal load
     $tree_types = ['Metadata File Not Found'];
     $locations_list = ['Metadata File Not Found'];
 }
@@ -54,6 +48,15 @@ if ($metadata_path && file_exists($metadata_path)) {
 function get_photo_url($path, $base) {
     if (empty($path)) return '';
     return (strpos($path, 'http') === 0) ? $path : $base . $path;
+}
+
+function build_url($params = []) {
+    $current = $_GET;
+    if(isset($params['action']) && $params['action'] !== ($current['action'] ?? '')) {
+        unset($current['page']);
+    }
+    $query = array_merge($current, $params);
+    return '?' . http_build_query($query);
 }
 
 function export_data($pdo, $ids, $type, $base_url, $upload_dir, $full_project_id = null) {
@@ -233,8 +236,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['csrf_token'])) {
 function buildWhere($table, $pdo) {
     $where = []; $p = [];
     if (!empty($_GET['search'])) { 
-        if ($table == 'geotags') { $where[] = "(itemType LIKE ? OR locationName LIKE ?)"; $p[] = "%{$_GET['search']}%"; $p[] = "%{$_GET['search']}%"; } 
-        elseif ($table == 'projects') { $where[] = "(activityName LIKE ? OR locationName LIKE ? OR officers LIKE ?)"; $p[] = "%{$_GET['search']}%"; $p[] = "%{$_GET['search']}%"; $p[] = "%{$_GET['search']}%"; }
+        $s = "%{$_GET['search']}%";
+        if ($table == 'geotags') { 
+            $where[] = "(id LIKE ? OR itemType LIKE ? OR locationName LIKE ? OR details LIKE ? OR `condition` LIKE ? OR projectId LIKE ?)"; 
+            $p = array_fill(0, 6, $s);
+        } 
+        elseif ($table == 'projects') { 
+            $where[] = "(activityName LIKE ? OR locationName LIKE ? OR officers LIKE ? OR projectId LIKE ?)"; 
+            $p = array_fill(0, 4, $s);
+        }
     }
     if ($table == 'geotags') {
         if (!empty($_GET['condition']) && $_GET['condition'] != 'all') { $where[] = "`condition`=?"; $p[] = $_GET['condition']; }
@@ -252,13 +262,24 @@ if ($action === 'dashboard') {
     $stats['daily'] = $pdo->query("SELECT DATE(timestamp), COUNT(*) FROM geotags WHERE timestamp >= DATE(NOW()) - INTERVAL 7 DAY GROUP BY DATE(timestamp)")->fetchAll(PDO::FETCH_KEY_PAIR);
 }
 
-$list_data = []; $page = (int)($_GET['page'] ?? 1); $per_page = 20; $total_pages = 1; if ($page < 1) $page = 1;
+// --- LOGIKA PAGINATION ---
+$list_data = []; 
+$page = (int)($_GET['page'] ?? 1); 
+
+// Matikan Pagination khusus Geotags (Limit 9999999)
+if ($table === 'geotags' && $action === 'list') {
+    $per_page = 9999999; 
+} else {
+    $per_page = 20; 
+}
+
+$total_pages = 1; 
+if ($page < 1) $page = 1;
 
 if (in_array($action, ['list', 'gallery', 'map', 'users'])) {
     if ($action == 'users') { 
         $list_data = $pdo->query("SELECT * FROM admin_users ORDER BY id DESC")->fetchAll(); 
     } elseif ($action == 'map') {
-        // MAP VIEW: Fetch FULL DATA
         list($where, $p) = buildWhere('geotags', $pdo);
         $sql = "SELECT id, latitude, longitude, itemType, `condition`, photoPath, locationName FROM geotags " . ($where ? "WHERE ".implode(' AND ', $where) : "") . " ORDER BY id DESC";
         $stmt = $pdo->prepare($sql); $stmt->execute($p); $map_data = $stmt->fetchAll();
@@ -267,7 +288,9 @@ if (in_array($action, ['list', 'gallery', 'map', 'users'])) {
         $w_sql = $where ? "WHERE ".implode(' AND ', $where) : "";
         $total_stmt = $pdo->prepare("SELECT COUNT(*) FROM `$table` $w_sql"); $total_stmt->execute($p);
         $total_rows = $total_stmt->fetchColumn(); $total_pages = ceil($total_rows / $per_page);
+        
         $offset = ($page - 1) * $per_page;
+        
         $stmt = $pdo->prepare("SELECT * FROM `$table` $w_sql ORDER BY `$pk` DESC LIMIT $per_page OFFSET $offset");
         $stmt->execute($p); $list_data = $stmt->fetchAll();
         if ($table == 'geotags') $projects_list = $pdo->query("SELECT projectId, activityName FROM projects ORDER BY created_at DESC")->fetchAll();
@@ -310,7 +333,7 @@ if (in_array($action, ['list', 'gallery', 'map', 'users'])) {
         .filter-bar{display:flex;gap:10px;flex-wrap:wrap;background:#fff;padding:15px;border-radius:10px;border:1px solid #e0e0e0;margin-bottom:20px;align-items:center}
         input,select{padding:9px 12px;border:1px solid #ddd;border-radius:6px;font-size:14px;outline:none}
         input:focus,select:focus{border-color:#2E7D32}
-        .modal{display:none;position:fixed;z-index:1000;left:0;top:0;width:100%;height:100%;background:rgba(0,0,0,0.9);justify-content:center;align-items:center;flex-direction:column}
+        .modal{display:none;position:fixed;z-index:3000;left:0;top:0;width:100%;height:100%;background:rgba(0,0,0,0.85);justify-content:center;align-items:center;flex-direction:column}
         .modal-content{max-width:90%;max-height:85%;border-radius:5px;box-shadow:0 0 20px rgba(0,0,0,0.5)}
         .status-badge{padding:4px 8px;border-radius:4px;font-size:11px;font-weight:bold;text-transform:uppercase}
         .status-Active{background:#e8f5e9;color:#2E7D32} .status-Completed{background:#e3f2fd;color:#1976d2}
@@ -349,11 +372,11 @@ if(isset($_SESSION['swal_warning'])){ echo "<script>Swal.fire({icon:'warning',ti
 <nav class="sidebar">
     <div class="brand"><img src="https://seedloc.my.id/logo.png" width="32"> <span>SeedLoc</span></div>
     <ul class="nav">
-        <li><a href="?action=dashboard" class="<?=$action=='dashboard'?'active':''?>"><i class="fas fa-chart-pie"></i> <span>Dashboard</span></a></li>
-        <li><a href="?action=map" class="<?=$action=='map'?'active':''?>"><i class="fas fa-map-marked-alt"></i> <span>Peta Sebaran</span></a></li>
-        <li><a href="?action=list&table=projects" class="<?=($action=='list'&&$table=='projects')?'active':''?>"><i class="fas fa-folder-open"></i> <span>Data Projects</span></a></li>
-        <li><a href="?action=list&table=geotags" class="<?=($action=='list'&&$table=='geotags')?'active':''?>"><i class="fas fa-leaf"></i> <span>Data Geotags</span></a></li>
-        <li><a href="?action=gallery" class="<?=$action=='gallery'?'active':''?>"><i class="fas fa-images"></i> <span>Galeri Foto</span></a></li>
+        <li><a href="<?=build_url(['action'=>'dashboard'])?>" class="<?=$action=='dashboard'?'active':''?>"><i class="fas fa-chart-pie"></i> <span>Dashboard</span></a></li>
+        <li><a href="<?=build_url(['action'=>'map'])?>" class="<?=$action=='map'?'active':''?>"><i class="fas fa-map-marked-alt"></i> <span>Peta Sebaran</span></a></li>
+        <li><a href="<?=build_url(['action'=>'list', 'table'=>'projects'])?>" class="<?=($action=='list'&&$table=='projects')?'active':''?>"><i class="fas fa-folder-open"></i> <span>Data Projects</span></a></li>
+        <li><a href="<?=build_url(['action'=>'list', 'table'=>'geotags'])?>" class="<?=($action=='list'&&$table=='geotags')?'active':''?>"><i class="fas fa-leaf"></i> <span>Data Geotags</span></a></li>
+        <li><a href="<?=build_url(['action'=>'gallery'])?>" class="<?=$action=='gallery'?'active':''?>"><i class="fas fa-images"></i> <span>Galeri Foto</span></a></li>
         <li style="border-top:1px solid #f0f0f0;margin:10px 0;"></li>
         <li><a href="?action=users" class="<?=$action=='users'?'active':''?>"><i class="fas fa-user-shield"></i> <span>Admin Users</span></a></li>
         <li><a href="?action=logout" style="color:#d32f2f;"><i class="fas fa-sign-out-alt"></i> <span>Keluar</span></a></li>
@@ -387,8 +410,18 @@ if(isset($_SESSION['swal_warning'])){ echo "<script>Swal.fire({icon:'warning',ti
         <div class="header"><h2>Peta Sebaran Real-time (Full Data)</h2></div>
         <form class="filter-bar">
             <input type="hidden" name="action" value="map">
-            <select name="condition"><option value="all">Semua Kondisi</option><option value="Baik">Hidup</option><option value="Rusak">Merana</option><option value="Mati">Mati</option></select>
-            <div style="display:flex;align-items:center;gap:5px;"><input type="date" name="start_date"> <span>s/d</span> <input type="date" name="end_date"></div>
+            <input type="text" name="search" placeholder="Cari..." value="<?=htmlspecialchars($_GET['search']??'')?>" style="max-width:200px;">
+            <select name="condition">
+                <option value="all" <?=($_GET['condition']??'')=='all'?'selected':''?>>Semua Kondisi</option>
+                <option value="Hidup" <?=($_GET['condition']??'')=='Hidup'?'selected':''?>>Hidup</option>
+                <option value="Merana" <?=($_GET['condition']??'')=='Merana'?'selected':''?>>Merana</option>
+                <option value="Mati" <?=($_GET['condition']??'')=='Mati'?'selected':''?>>Mati</option>
+            </select>
+            <div style="display:flex;align-items:center;gap:5px;">
+                <input type="date" name="start_date" value="<?=htmlspecialchars($_GET['start_date']??'')?>"> 
+                <span>s/d</span> 
+                <input type="date" name="end_date" value="<?=htmlspecialchars($_GET['end_date']??'')?>">
+            </div>
             <button class="btn btn-p">Filter</button> <a href="?action=map" class="btn btn-d">Reset</a>
         </form>
         <div class="card" style="padding:0;overflow:hidden;">
@@ -399,35 +432,41 @@ if(isset($_SESSION['swal_warning'])){ echo "<script>Swal.fire({icon:'warning',ti
             var streets = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { attribution: '&copy; OpenStreetMap' });
             var satellite = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', { attribution: '&copy; Esri' });
             
-            m.addLayer(streets);
-            L.control.layers({ "Peta Jalan": streets, "Satelit": satellite }).addTo(m);
+            var savedLayer = localStorage.getItem('SelectedLayer');
+            if (savedLayer === 'Satelit') { m.addLayer(satellite); } else { m.addLayer(streets); }
+
+            var baseMaps = { "Peta Jalan": streets, "Satelit": satellite };
+            L.control.layers(baseMaps).addTo(m);
+
+            m.on('baselayerchange', function(e) { localStorage.setItem('SelectedLayer', e.name); });
 
             var markers = L.markerClusterGroup();
             var pts = <?=json_encode($map_data)?>; 
-            var b=[];
+            var bounds = [];
 
             pts.forEach(p=>{
                 var lat=parseFloat(p.latitude),lng=parseFloat(p.longitude);
                 if(!isNaN(lat)){
-                    var c='orange'; 
-                    if(p.condition=='Baik'||p.condition=='Hidup')c='green'; 
-                    else if(p.condition=='Mati'||p.condition=='Rusak'||p.condition=='Buruk')c='red';
+                    var color = 'blue';
+                    if (p.condition == 'Hidup' || p.condition == 'Baik') color = 'green';
+                    else if (p.condition == 'Merana' || p.condition == 'Rusak') color = 'orange';
+                    else if (p.condition == 'Mati') color = 'red';
                     
                     var icon = L.divIcon({
                         className: 'custom-div-icon',
-                        html: `<div style="background-color:${c};"></div>`,
+                        html: `<div style="background-color:${color}; width:12px; height:12px; border-radius:50%; border:2px solid white; box-shadow:0 0 3px black;"></div>`,
                         iconSize: [12, 12], iconAnchor: [6, 6]
                     });
 
                     var img=p.photoPath?(p.photoPath.startsWith('http')?p.photoPath:'<?=$photo_base_url?>'+p.photoPath):'';
                     var mkr = L.marker([lat,lng],{icon:icon});
-                    mkr.bindPopup(`<b>${p.itemType}</b><br><span style='color:${c}'>${p.condition}</span><br>${p.locationName}${img?'<br><img src="'+img+'" width="100%" style="margin-top:5px;border-radius:4px;">':''}`);
+                    mkr.bindPopup(`<b>${p.itemType}</b><br><span style='color:${color}'>${p.condition}</span><br>${p.locationName}${img?'<br><img src="'+img+'" width="100%" style="margin-top:5px;border-radius:4px;">':''}`);
                     markers.addLayer(mkr);
-                    b.push([lat,lng]);
+                    bounds.push([lat,lng]);
                 }
             });
             m.addLayer(markers);
-            if(b.length) m.fitBounds(b, {padding:[50,50]});
+            if(bounds.length) m.fitBounds(bounds, {padding:[50,50]});
         </script>
 
     <?php elseif(in_array($action, ['list', 'users'])): ?>
@@ -439,11 +478,18 @@ if(isset($_SESSION['swal_warning'])){ echo "<script>Swal.fire({icon:'warning',ti
         <?php if($action=='list'): ?>
         <form class="filter-bar">
             <input type="hidden" name="action" value="list"><input type="hidden" name="table" value="<?=$table?>">
-            <input type="text" name="search" placeholder="Cari data..." value="<?=htmlspecialchars($_GET['search']??'')?>" style="flex:1;">
+            <input type="text" name="search" placeholder="Cari ID, Jenis, Lokasi, Detail..." value="<?=htmlspecialchars($_GET['search']??'')?>" style="flex:1;">
             
             <?php if($table=='geotags'): ?>
-                <select name="projectId"><option value="all">Semua Project</option><?php foreach($projects_list as $p) echo "<option value='{$p['projectId']}' ".($_GET['projectId']??''==$p['projectId']?'selected':'').">{$p['activityName']}</option>"; ?></select>
-                <div style="display:flex;align-items:center;gap:5px;"><input type="date" name="start_date"> - <input type="date" name="end_date"></div>
+                <select name="projectId">
+                    <option value="all">Semua Project</option>
+                    <?php foreach($projects_list as $p) echo "<option value='{$p['projectId']}' ". (($_GET['projectId']??'') == $p['projectId'] ? 'selected' : '') .">{$p['activityName']}</option>"; ?>
+                </select>
+                <div style="display:flex;align-items:center;gap:5px;">
+                    <input type="date" name="start_date" value="<?=htmlspecialchars($_GET['start_date']??'')?>"> 
+                    - 
+                    <input type="date" name="end_date" value="<?=htmlspecialchars($_GET['end_date']??'')?>">
+                </div>
             <?php endif; ?>
             
             <button class="btn btn-b"><i class="fas fa-search"></i> Cari</button> <a href="?action=list&table=<?=$table?>" class="btn btn-d"><i class="fas fa-sync"></i></a>
@@ -501,7 +547,7 @@ if(isset($_SESSION['swal_warning'])){ echo "<script>Swal.fire({icon:'warning',ti
                             <?php if($table=='geotags'): ?>
                                 <td><input type="checkbox" name="selected_ids[]" value="<?=$r[$pk]?>"></td>
                                 <?php $i=get_photo_url($r['photoPath'], $photo_base_url); ?>
-                                <td><?php if($i):?><img src="<?=$i?>" width="45" height="45" style="object-fit:cover;border-radius:4px;cursor:pointer;border:1px solid #ddd;" onclick="showModal('<?=$i?>','<?=$r['itemType']?>')"><?php else: ?>-<?php endif; ?></td>
+                                <td><?php if($i):?><img src="<?=$i?>" width="45" height="45" style="object-fit:cover;border-radius:4px;cursor:pointer;border:1px solid #ddd;" onclick="viewDetail(<?=htmlspecialchars(json_encode($r), ENT_QUOTES, 'UTF-8')?>)"><?php else: ?>-<?php endif; ?></td>
                                 <td>#<?=$r['id']?></td>
                                 <td><b><?=$r['itemType']?></b></td>
                                 <td><?=$r['locationName']?></td>
@@ -524,6 +570,12 @@ if(isset($_SESSION['swal_warning'])){ echo "<script>Swal.fire({icon:'warning',ti
                             <?php endif; ?>
                             
                             <td style="text-align:right;">
+                                <?php if($table=='geotags'): 
+                                    $r_json = htmlspecialchars(json_encode($r), ENT_QUOTES, 'UTF-8');
+                                ?>
+                                    <button type="button" onclick="viewDetail(<?=$r_json?>)" class="btn btn-i" title="Detail" style="background:#00bcd4;"><i class="fas fa-eye"></i></button>
+                                <?php endif; ?>
+                                
                                 <a href="?action=edit&table=<?=$table?>&id=<?=$r[$pk]?>" class="btn btn-b" title="Edit"><i class="fas fa-edit"></i></a>
                                 <button type="button" onclick="confirmDel('<?=$r[$pk]?>')" class="btn btn-d" title="Hapus"><i class="fas fa-trash"></i></button>
                             </td>
@@ -571,6 +623,7 @@ if(isset($_SESSION['swal_warning'])){ echo "<script>Swal.fire({icon:'warning',ti
             </form>
         <?php endif; ?>
         
+        <?php if($table !== 'geotags' || $action !== 'list'): ?>
         <div style="display:flex;justify-content:center;gap:8px;margin-top:20px;">
             <?php 
             $q = $_GET; 
@@ -578,17 +631,36 @@ if(isset($_SESSION['swal_warning'])){ echo "<script>Swal.fire({icon:'warning',ti
             if($page < $total_pages) { $q['page'] = $page + 1; echo '<a href="?'.http_build_query($q).'" class="btn btn-p" style="background:#fff;color:#333;border:1px solid #ddd;">Next &raquo;</a>'; } 
             ?>
         </div>
+        <?php endif; ?>
 
     <?php elseif($action === 'gallery'): ?>
         <div class="header"><h2>Galeri Lapangan</h2></div>
-        <form class="filter-bar"><input type="hidden" name="action" value="gallery"><input type="hidden" name="table" value="geotags"><input type="text" name="search" placeholder="Cari foto..." style="flex:1;"><button class="btn btn-p">Cari</button></form>
-        <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:15px;">
+        <form class="filter-bar"><input type="hidden" name="action" value="gallery"><input type="hidden" name="table" value="geotags"><input type="text" name="search" placeholder="Cari foto..." value="<?=htmlspecialchars($_GET['search']??'')?>" style="flex:1;"><button class="btn btn-p">Cari</button></form>
+        
+        <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:15px;">
             <?php if(!empty($list_data)): foreach($list_data as $r): $i=get_photo_url($r['photoPath']??'', $photo_base_url); if(!$i) continue; ?>
-            <div class="card" style="padding:0;overflow:hidden;cursor:pointer;transition:transform 0.2s;" onclick="showModal('<?=$i?>','<?=$r['itemType']?>')" onmouseover="this.style.transform='scale(1.02)'" onmouseout="this.style.transform='scale(1)'">
-                <img src="<?=$i?>" style="width:100%;height:140px;object-fit:cover;">
-                <div style="padding:10px;">
-                    <b style="font-size:13px;display:block;margin-bottom:3px;"><?=$r['itemType']?></b>
-                    <small style="color:#888;"><i class="fas fa-map-marker-alt"></i> <?=$r['locationName']?></small>
+            <div class="card" style="padding:0;overflow:hidden;cursor:pointer;transition:transform 0.2s;position:relative;" onclick="viewDetail(<?=htmlspecialchars(json_encode($r), ENT_QUOTES, 'UTF-8')?>)" onmouseover="this.style.transform='scale(1.02)'" onmouseout="this.style.transform='scale(1)'">
+                
+                <div style="position:absolute;top:10px;right:10px;padding:3px 8px;border-radius:4px;font-size:10px;font-weight:bold;box-shadow:0 2px 4px rgba(0,0,0,0.3);<?= 
+                    ($r['condition']=='Hidup' || $r['condition']=='Baik') ? 'background:#e8f5e9;color:#2E7D32;' : 
+                    (($r['condition']=='Merana') ? 'background:#fff3cd;color:#856404;' : 
+                    'background:#ffebee;color:#c62828;') 
+                ?>">
+                    <?=$r['condition']?>
+                </div>
+
+                <img src="<?=$i?>" style="width:100%;height:150px;object-fit:cover;">
+                
+                <div style="padding:12px;">
+                    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:5px;">
+                        <span style="font-size:11px;color:#999;">#<?=$r['id']?></span>
+                        <span style="font-size:11px;color:#666;"><?=substr($r['timestamp'],0,10)?></span>
+                    </div>
+                    <b style="font-size:14px;display:block;margin-bottom:3px;color:#333;"><?=$r['itemType']?></b>
+                    <small style="color:#666;display:block;margin-bottom:5px;"><i class="fas fa-map-marker-alt"></i> <?=$r['locationName']?></small>
+                    <?php if(!empty($r['details'])): ?>
+                        <small style="color:#888;font-style:italic;display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">"<?=$r['details']?>"</small>
+                    <?php endif; ?>
                 </div>
             </div>
             <?php endforeach; endif; ?>
@@ -612,7 +684,6 @@ if(isset($_SESSION['swal_warning'])){ echo "<script>Swal.fire({icon:'warning',ti
                             <label>Tipe Item</label>
                             <select name="itemType" style="width:100%;">
                                 <?php 
-                                // Logic: Tampilkan List Metadata + Value saat ini jika tidak ada di list
                                 $opts = $tree_types;
                                 if($is_edit && !in_array($d['itemType'], $opts)) array_unshift($opts, $d['itemType']);
                                 foreach($opts as $t) {
@@ -704,11 +775,51 @@ if(isset($_SESSION['swal_warning'])){ echo "<script>Swal.fire({icon:'warning',ti
     <?php endif; ?>
 </main>
 
+<div id="detailModal" class="modal" style="display:none;">
+    <div class="modal-content" style="width: 500px; padding: 0; background: #fff; border-radius: 8px; position: relative; overflow: hidden;">
+        <div style="background:#2E7D32; padding:15px 20px; color:#fff; font-weight:bold; font-size:16px;">
+            Detail Data
+            <span onclick="document.getElementById('detailModal').style.display='none'" style="float:right; cursor:pointer; font-size:20px;">&times;</span>
+        </div>
+        <div id="detailContent" style="padding:20px; max-height: 80vh; overflow-y:auto;"></div>
+    </div>
+</div>
+
 <div id="imgModal" class="modal" onclick="this.style.display='none'"><img class="modal-content" id="modalImg"><div id="modalCaption" style="color:#fff;margin-top:15px;font-size:16px;background:rgba(0,0,0,0.5);padding:5px 15px;border-radius:20px;"></div></div>
 
 <script>
     function toggle(s){var c=document.querySelectorAll('input[name="selected_ids[]"]');for(var i=0;i<c.length;i++)c[i].checked=s.checked;}
-    function showModal(s,c){document.getElementById('imgModal').style.display="flex";document.getElementById('modalImg').src=s;document.getElementById('modalCaption').innerHTML=c;}
+    
+    // Original Show Modal for Images (from Gallery)
+    function showModal(s,c){
+        document.getElementById('imgModal').style.display="flex";
+        document.getElementById('modalImg').src=s;
+        document.getElementById('modalCaption').innerHTML=c;
+    }
+
+    // FIX: New View Detail Function
+    function viewDetail(data) {
+        var photoUrl = data.photoPath ? (data.photoPath.startsWith('http') ? data.photoPath : '<?=$photo_base_url?>' + data.photoPath) : '';
+        var color = data.condition == 'Hidup' || data.condition == 'Baik' ? '#2E7D32' : (data.condition == 'Mati' ? '#c62828' : '#f39c12');
+        
+        var html = `
+            <div style="text-align:center; margin-bottom:15px;">
+                ${photoUrl ? `<img src="${photoUrl}" style="max-width:100%; max-height:250px; border-radius:8px; border:1px solid #eee; cursor:pointer;" onclick="showModal('${photoUrl}', '${data.itemType}')">` : '<div style="padding:40px; background:#f5f5f5; color:#999; border-radius:8px;">Tidak Ada Foto</div>'}
+            </div>
+            <table style="width:100%; border-collapse:collapse;">
+                <tr><td style="padding:8px 0; color:#666; font-size:12px; font-weight:bold; width:100px;">JENIS POHON</td><td style="font-weight:bold; font-size:15px;">${data.itemType}</td></tr>
+                <tr><td style="padding:8px 0; color:#666; font-size:12px; font-weight:bold;">LOKASI</td><td><i class="fas fa-map-marker-alt" style="color:#d32f2f"></i> ${data.locationName}</td></tr>
+                <tr><td style="padding:8px 0; color:#666; font-size:12px; font-weight:bold;">KONDISI</td><td><span class="status-badge" style="background:${color}; color:#fff;">${data.condition}</span></td></tr>
+                <tr><td style="padding:8px 0; color:#666; font-size:12px; font-weight:bold;">KOORDINAT</td><td style="font-family:monospace;">${parseFloat(data.latitude).toFixed(6)}, ${parseFloat(data.longitude).toFixed(6)}</td></tr>
+                <tr><td style="padding:8px 0; color:#666; font-size:12px; font-weight:bold;">WAKTU</td><td>${data.timestamp}</td></tr>
+                <tr><td style="padding:8px 0; color:#666; font-size:12px; font-weight:bold; vertical-align:top;">CATATAN</td><td style="background:#f9f9f9; padding:8px; border-radius:4px; font-size:13px; line-height:1.4;">${data.details || '-'}</td></tr>
+                <tr><td style="padding:8px 0; color:#666; font-size:12px; font-weight:bold;">PROJECT ID</td><td>#${data.projectId}</td></tr>
+            </table>
+        `;
+        document.getElementById('detailContent').innerHTML = html;
+        document.getElementById('detailModal').style.display = 'flex';
+    }
+
     function confirmBulk(){
         var s=document.querySelector('select[name="bulk_action_type"]');
         if(s.value==''){ Swal.fire('Pilih Aksi','Silakan pilih aksi massal terlebih dahulu.','info'); return; } 

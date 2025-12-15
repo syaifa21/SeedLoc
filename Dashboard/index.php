@@ -1,10 +1,9 @@
 <?php
-// Dashboard/index.php - Updated: Separate Data Fetching for Map (All) & Table (Paginated)
+// Dashboard/index.php - Updated: SEARCH ALL FIELDS (ID, Type, Location, Details, Condition, ProjectID)
 
 require_once 'api/config.php';
 require_once 'api/db.php';
 
-// Hapus header JSON agar browser me-render HTML
 header('Content-Type: text/html; charset=utf-8');
 
 // --- 1. KONEKSI DATABASE ---
@@ -28,23 +27,36 @@ function build_filter_query($search, $condition, $start, $end) {
     $where = [];
     $params = [];
 
+    // --- LOGIKA PENCARIAN SUPER LENGKAP ---
     if ($search) {
-        $where[] = "(itemType LIKE ? OR locationName LIKE ? OR details LIKE ?)";
-        $params[] = "%$search%"; $params[] = "%$search%"; $params[] = "%$search%";
+        // Mencari ke SEMUA kolom teks yang relevan
+        $where[] = "(id LIKE ? OR itemType LIKE ? OR locationName LIKE ? OR details LIKE ? OR `condition` LIKE ? OR projectId LIKE ?)";
+        $term = "%$search%";
+        $params[] = $term; // id
+        $params[] = $term; // itemType
+        $params[] = $term; // locationName
+        $params[] = $term; // details
+        $params[] = $term; // condition
+        $params[] = $term; // projectId
     }
+
+    // Filter Dropdown
     if ($condition && $condition !== 'all') {
         $where[] = "`condition` = ?";
         $params[] = $condition;
     }
+
+    // Filter Tanggal
     if ($start) { $where[] = "timestamp >= ?"; $params[] = $start . ' 00:00:00'; }
     if ($end) { $where[] = "timestamp <= ?"; $params[] = $end . ' 23:59:59'; }
 
+    // Gabungkan WHERE clause
     if (!empty($where)) $sql .= " WHERE " . implode(' AND ', $where);
     
     return ['sql' => $sql, 'params' => $params];
 }
 
-// Fetch untuk TABEL (Pakai Limit & Offset)
+// Fetch untuk TABEL
 function fetch_geotags_table($conn, $base_query, $params, $limit, $offset) {
     $sql = "SELECT * " . $base_query . " ORDER BY id DESC LIMIT $limit OFFSET $offset";
     $stmt = $conn->prepare($sql);
@@ -52,9 +64,8 @@ function fetch_geotags_table($conn, $base_query, $params, $limit, $offset) {
     return $stmt->fetchAll(PDO::FETCH_ASSOC);
 }
 
-// Fetch untuk PETA (AMBIL SEMUA DATA tanpa limit)
+// Fetch untuk PETA
 function fetch_geotags_map($conn, $base_query, $params) {
-    // Kita ambil field yg diperlukan peta saja biar ringan jika datanya ribuan
     $sql = "SELECT id, latitude, longitude, itemType, locationName, `condition`, photoPath, details, timestamp " . $base_query . " ORDER BY id DESC";
     $stmt = $conn->prepare($sql);
     $stmt->execute($params);
@@ -78,37 +89,27 @@ function fetch_stats_data($conn, $base_query, $params) {
 }
 
 // --- 3. PROSES REQUEST ---
-$limit = 20; // Limit Tabel
+$limit = 20; 
 $page = isset($_GET['page']) ? (int)$_GET['page'] : 1;
 $offset = ($page - 1) * $limit;
 
-// Ambil Parameter Filter
 $search = $_GET['search'] ?? '';
 $cond = $_GET['condition'] ?? 'all';
 $start = $_GET['start_date'] ?? '';
 $end = $_GET['end_date'] ?? '';
 $view = $_GET['view'] ?? 'map';
 
-// Build Query Dasar
 $filter = build_filter_query($search, $cond, $start, $end);
 
-// 1. Ambil Data Tabel (Terbatas 20)
 $geotags_table = fetch_geotags_table($conn, $filter['sql'], $filter['params'], $limit, $offset);
-
-// 2. Ambil Data Peta (SEMUA DATA)
 $geotags_map = fetch_geotags_map($conn, $filter['sql'], $filter['params']);
-
-// 3. Hitung Total & Stats
 $total_records = count_records($conn, $filter['sql'], $filter['params']);
 $total_pages = ceil($total_records / $limit);
 $chart_data = fetch_stats_data($conn, $filter['sql'], $filter['params']);
 $latest_project = fetch_latest_project($conn);
 
-// Encode JSON (Gunakan data MAP yang full)
 $geotags_json = json_encode($geotags_map); 
 $chart_json = json_encode($chart_data);
-
-// Base URL Foto
 $photo_base_url = 'https://seedloc.my.id/api/';
 
 function build_url($params = []) {
@@ -138,8 +139,7 @@ function build_url($params = []) {
         :root { --primary: #2E7D32; --light: #f4f6f8; --white: #fff; --text: #2c3e50; --border: #eee; }
         body { font-family: 'Segoe UI', sans-serif; background: var(--light); margin: 0; color: var(--text); display: flex; height: 100vh; overflow: hidden; }
 
-        /* --- Sidebar --- */
-        .sidebar { width: 260px; background: var(--white); border-right: 1px solid var(--border); display: flex; flex-direction: column; flex-shrink: 0; z-index: 1000; height: 100%; transition: width 0.3s; }
+        .sidebar { width: 260px; background: var(--white); border-right: 1px solid var(--border); display: flex; flex-direction: column; flex-shrink: 0; z-index: 1000; height: 100%; }
         .brand { padding: 25px 20px; display: flex; align-items: center; gap: 12px; border-bottom: 1px solid var(--border); }
         .brand img { width: 40px; }
         .brand div h2 { font-size: 18px; margin: 0; color: var(--primary); font-weight: 700; }
@@ -150,14 +150,11 @@ function build_url($params = []) {
         .nav-links li a:hover, .nav-links li a.active { background: #e8f5e9; color: var(--primary); border-left-color: var(--primary); }
         .nav-links li.divider { height: 1px; background: var(--border); margin: 10px 25px; }
 
-        /* --- Main Content --- */
         .main-content { flex: 1; overflow-y: auto; padding: 20px; display: flex; flex-direction: column; position: relative; }
         
-        /* --- Cards & Layout --- */
         .top-grid { display: grid; grid-template-columns: 3fr 1fr; gap: 20px; margin-bottom: 20px; }
         .card { background: var(--white); padding: 20px; border-radius: 12px; box-shadow: 0 2px 8px rgba(0,0,0,0.03); border: 1px solid var(--border); }
         
-        /* --- Filters --- */
         .filter-bar { display: flex; gap: 10px; flex-wrap: wrap; background: var(--white); padding: 15px; border-radius: 10px; border: 1px solid var(--border); margin-bottom: 20px; align-items: flex-end; }
         .filter-group { flex: 1; min-width: 140px; }
         .filter-group label { font-size: 11px; font-weight: 700; color: #777; margin-bottom: 4px; display: block; text-transform: uppercase; }
@@ -166,12 +163,10 @@ function build_url($params = []) {
         .btn-primary { background: var(--primary); color: white; }
         .btn-reset { background: #e74c3c; color: white; }
 
-        /* --- Map Area --- */
         .view-section { display: none; flex: 1; position: relative; }
         .view-section.active { display: block; }
         #map { width: 100%; height: 600px; border-radius: 12px; z-index: 1; border: 1px solid var(--border); }
 
-        /* --- Side Panel (Slide Out) --- */
         .side-panel {
             position: fixed; top: 0; right: -400px; width: 380px; height: 100vh;
             background: white; box-shadow: -5px 0 15px rgba(0,0,0,0.1);
@@ -186,27 +181,23 @@ function build_url($params = []) {
         .sp-label { font-size: 11px; color: #888; font-weight: 600; text-transform: uppercase; display: block; }
         .sp-value { font-size: 14px; font-weight: 500; color: #333; }
 
-        /* --- Table --- */
         table { width: 100%; border-collapse: collapse; }
         th, td { padding: 12px 15px; text-align: left; border-bottom: 1px solid #eee; font-size: 13px; }
         th { background: #f8f9fa; font-weight: 600; color: #555; position: sticky; top: 0; }
         tr:hover { background: #f1f8e9; cursor: pointer; }
+        
         .badge { padding: 4px 8px; border-radius: 4px; font-size: 11px; font-weight: bold; }
-        .badge.Baik { background: #e8f5e9; color: #2e7d32; }
-        .badge.Rusak { background: #ffebee; color: #c62828; }
-        .badge.Mati { background: #ffebee; color: #b71c1c; }
-        .badge.Cukup { background: #fff3cd; color: #f39c12; }
+        .badge.Hidup, .badge.Baik { background: #e8f5e9; color: #2e7d32; }
+        .badge.Merana, .badge.Rusak, .badge.Cukup { background: #fff3cd; color: #f39c12; }
+        .badge.Mati, .badge.Buruk { background: #ffebee; color: #c62828; }
+        
         .thumb { width: 40px; height: 40px; object-fit: cover; border-radius: 4px; }
-
-        /* --- Stats Chart --- */
         .chart-container { position: relative; height: 180px; width: 100%; display: flex; align-items: center; justify-content: center; }
         
-        /* --- Pagination --- */
         .pagination { display: flex; justify-content: center; gap: 5px; margin-top: 20px; }
         .pagination a, .pagination span { padding: 6px 12px; border: 1px solid #ddd; border-radius: 4px; text-decoration: none; color: #333; font-size: 13px; }
         .pagination .current { background: var(--primary); color: white; border-color: var(--primary); }
 
-        /* --- Modal --- */
         .modal { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.9); z-index: 3000; align-items: center; justify-content: center; }
         .modal.open { display: flex; }
         .modal img { max-width: 90%; max-height: 90vh; border-radius: 4px; }
@@ -261,8 +252,7 @@ function build_url($params = []) {
             <h3 style="margin:0; font-size:16px;" id="spTitle">Detail Data</h3>
             <button class="sp-close" onclick="closeSidePanel()">&times;</button>
         </div>
-        <div class="sp-content" id="spBody">
-            </div>
+        <div class="sp-content" id="spBody"></div>
     </div>
 
     <main class="main-content">
@@ -285,7 +275,7 @@ function build_url($params = []) {
                             <span style="font-size:13px;"><?php echo htmlspecialchars($latest_project['officers']); ?></span>
                         </div>
                         <div>
-                            <span style="font-size:11px; color:#888;">TOTAL DATA (ALL)</span><br>
+                            <span style="font-size:11px; color:#888;">TOTAL DATA</span><br>
                             <b style="font-size:18px; color: var(--primary);"><?php echo $total_records; ?></b>
                         </div>
                     </div>
@@ -307,14 +297,14 @@ function build_url($params = []) {
             
             <div class="filter-group">
                 <label>Pencarian</label>
-                <input type="text" name="search" class="filter-input" placeholder="Nama Pohon / Lokasi..." value="<?php echo htmlspecialchars($search); ?>">
+                <input type="text" name="search" class="filter-input" placeholder="ID / Nama / Lokasi / Detail..." value="<?php echo htmlspecialchars($search); ?>">
             </div>
             
             <div class="filter-group">
                 <label>Kondisi</label>
                 <select name="condition" class="filter-input">
                     <option value="all">Semua</option>
-                    <?php foreach(['Baik','Rusak','Mati','Cukup','Buruk'] as $c): ?>
+                    <?php foreach(['Hidup','Merana','Mati'] as $c): ?>
                         <option value="<?php echo $c; ?>" <?php echo $cond==$c?'selected':''; ?>><?php echo $c; ?></option>
                     <?php endforeach; ?>
                 </select>
@@ -343,7 +333,7 @@ function build_url($params = []) {
                 <div id="map"></div>
             </div>
             <p style="font-size:12px; color:#666; margin-top:5px;">
-                <i class="fas fa-info-circle"></i> Menampilkan <b><?php echo count($geotags_map); ?></b> titik lokasi (Semua data sesuai filter).
+                <i class="fas fa-info-circle"></i> Menampilkan <b><?php echo count($geotags_map); ?></b> titik lokasi.
             </p>
         </div>
 
@@ -414,7 +404,6 @@ function build_url($params = []) {
     </div>
 
     <script>
-        // Data Peta (Menggunakan FULL DATA)
         const mapData = <?php echo $geotags_json; ?>;
         const chartData = <?php echo $chart_json; ?>;
         const photoBase = '<?php echo $photo_base_url; ?>';
@@ -429,15 +418,23 @@ function build_url($params = []) {
             let center = [-6.2088, 106.8456];
             if(mapData.length > 0) center = [parseFloat(mapData[0].latitude), parseFloat(mapData[0].longitude)];
             
-            map = L.map('map', {
-                center: center,
-                zoom: 13,
-                layers: [streets]
+            map = L.map('map', { center: center, zoom: 13, layers: [] });
+
+            // LOGIKA PENYIMPANAN LAYER (LocalStorage)
+            const savedLayer = localStorage.getItem('SelectedLayer');
+            if (savedLayer === 'Satelit') {
+                map.addLayer(satellite);
+            } else {
+                map.addLayer(streets); // Default
+            }
+
+            const baseMaps = { "Peta Jalan": streets, "Satelit": satellite };
+            L.control.layers(baseMaps).addTo(map);
+
+            map.on('baselayerchange', function(e) {
+                localStorage.setItem('SelectedLayer', e.name);
             });
 
-            L.control.layers({ "Peta Jalan": streets, "Satelit": satellite }).addTo(map);
-
-            // Marker Clustering
             const markers = L.markerClusterGroup();
             
             mapData.forEach(d => {
@@ -446,9 +443,9 @@ function build_url($params = []) {
                 if(isNaN(lat) || isNaN(lng)) return;
 
                 let color = 'blue';
-                if(d.condition === 'Baik') color = 'green';
-                else if(d.condition === 'Rusak' || d.condition === 'Mati') color = 'red';
-                else if(d.condition === 'Cukup') color = 'orange';
+                if(d.condition === 'Hidup' || d.condition === 'Baik') color = 'green';
+                else if(d.condition === 'Merana' || d.condition === 'Rusak' || d.condition === 'Cukup') color = 'orange';
+                else if(d.condition === 'Mati' || d.condition === 'Buruk') color = 'red';
 
                 const icon = L.divIcon({
                     className: 'custom-div-icon',
@@ -477,10 +474,11 @@ function build_url($params = []) {
             if(!ctx) return;
             const labels = Object.keys(chartData);
             const data = Object.values(chartData);
+            
             const bgColors = labels.map(l => {
-                if(l === 'Baik') return '#4caf50'; 
-                if(l === 'Rusak' || l === 'Mati') return '#f44336'; 
-                if(l === 'Cukup') return '#ff9800'; 
+                if(l === 'Hidup' || l === 'Baik') return '#4caf50'; 
+                if(l === 'Merana' || l === 'Rusak' || l === 'Cukup') return '#ff9800'; 
+                if(l === 'Mati' || l === 'Buruk') return '#f44336'; 
                 return '#2196f3';
             });
 
@@ -498,7 +496,9 @@ function build_url($params = []) {
             
             let imgUrl = data.photoPath ? (data.photoPath.startsWith('http') ? data.photoPath : photoBase + data.photoPath) : '';
             let imgHtml = imgUrl ? `<img src="${imgUrl}" class="sp-img" onclick="openModal('${imgUrl}')">` : `<div style="height:100px; background:#eee; display:flex; align-items:center; justify-content:center; border-radius:8px; margin-bottom:15px; color:#999;">Tidak ada foto</div>`;
-            let condColor = data.condition === 'Baik' ? 'green' : (data.condition === 'Rusak' ? 'red' : 'orange');
+            
+            let condColor = (data.condition === 'Hidup' || data.condition === 'Baik') ? 'green' : 
+                            ((data.condition === 'Mati' || data.condition === 'Buruk') ? 'red' : 'orange');
 
             title.innerText = `Geotag #${data.id}`;
             body.innerHTML = `

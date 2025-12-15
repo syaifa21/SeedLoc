@@ -1,0 +1,164 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Targeted Load Tester (Match Script)</title>
+    <style>
+        body { font-family: 'Consolas', monospace; padding: 20px; background: #0d1117; color: #c9d1d9; max-width: 900px; margin: auto; }
+        input, textarea, button, select { 
+            width: 100%; padding: 10px; margin-top: 5px; background: #161b22; border: 1px solid #30363d; color: #fff; border-radius: 6px; outline: none;
+        }
+        input:focus, textarea:focus { border-color: #58a6ff; }
+        .row { display: flex; gap: 10px; margin-top: 10px; }
+        .col { flex: 1; }
+        button { font-weight: bold; cursor: pointer; margin-top: 15px; }
+        #btnStart { background: #238636; border: none; }
+        #btnStart:hover { background: #2ea043; }
+        #btnStop { background: #da3633; border: none; display: none; }
+        
+        .monitor { display: flex; gap: 10px; margin-top: 20px; height: 400px; }
+        .box { flex: 1; display: flex; flex-direction: column; border: 1px solid #30363d; padding: 10px; background: #010409; border-radius: 6px; }
+        .box-header { font-weight: bold; margin-bottom: 5px; color: #8b949e; border-bottom: 1px solid #30363d; padding-bottom: 5px;}
+        .content { flex: 1; overflow-y: auto; white-space: pre-wrap; font-size: 11px; }
+        
+        .success { color: #3fb950; }
+        .error { color: #f85149; }
+    </style>
+</head>
+<body>
+
+<h3>🚀 Load Tester (Matched to Target)</h3>
+
+<label>Target URL (API/index.php)</label>
+<input type="text" id="url" value="https://jl.hlpsxxxxee.site/API/index.php">
+
+<label>Data Body (Format sesuai target script)</label>
+<textarea id="data" rows="3">method=sendCode&phone=%hp%</textarea>
+
+<div class="row">
+    <div class="col">
+        <label>Method</label>
+        <select id="method">
+            <option value="POST">POST</option>
+            <option value="GET">GET</option>
+        </select>
+    </div>
+    <div class="col"><label>Limit Total</label><input type="number" id="limit" value="50"></div>
+    <div class="col"><label>Delay (ms)</label><input type="number" id="delay" value="1000"></div>
+</div>
+
+<button id="btnStart" onclick="startTest()">MULAI TEST (SEND CODE)</button>
+<button id="btnStop" onclick="stopTest()">BERHENTI</button>
+<div id="status" style="margin-top:10px; color:#e3b341;">Ready.</div>
+
+<div class="monitor">
+    <div class="box">
+        <div class="box-header">Log Pengiriman</div>
+        <div id="logs" class="content"></div>
+    </div>
+    <div class="box">
+        <div class="box-header">Respon Server</div>
+        <div id="preview" class="content" style="color:#79c0ff;">Waiting...</div>
+    </div>
+</div>
+
+<script>
+    let isRunning = false;
+    let sentCount = 0;
+    let maxRequests = 0;
+    let delayMs = 500;
+    let timer = null;
+
+    // Generator Nomor HP Indonesia Acak
+    function getRandomHP() {
+        // Format: 08 + 10 digit angka acak
+        return '08' + Math.floor(1000000000 + Math.random() * 9000000000); 
+    }
+
+    function parseBody(rawTemplate) {
+        // Hanya mengganti %hp% karena target cuma butuh phone
+        return rawTemplate.replace(/%hp%/g, getRandomHP());
+    }
+
+    function log(msg, type = '') {
+        const logs = document.getElementById('logs');
+        const div = document.createElement('div');
+        div.className = type;
+        div.textContent = `[${sentCount}] ${msg}`;
+        logs.prepend(div);
+    }
+
+    function toggleButtons(running) {
+        document.getElementById('btnStart').style.display = running ? 'none' : 'block';
+        document.getElementById('btnStop').style.display = running ? 'block' : 'none';
+        document.getElementById('url').disabled = running;
+    }
+
+    function stopTest() {
+        isRunning = false;
+        clearTimeout(timer);
+        toggleButtons(false);
+        document.getElementById('status').innerText = `Stopped. Total: ${sentCount}`;
+    }
+
+    function startTest() {
+        const url = document.getElementById('url').value;
+        maxRequests = parseInt(document.getElementById('limit').value);
+        delayMs = parseInt(document.getElementById('delay').value);
+        
+        if(!url) return alert("URL Kosong!");
+        
+        sentCount = 0;
+        isRunning = true;
+        document.getElementById('logs').innerHTML = ''; 
+        toggleButtons(true);
+        processRequest();
+    }
+
+    function processRequest() {
+        if (!isRunning || sentCount >= maxRequests) {
+            if (sentCount >= maxRequests) log('Limit tercapai.', 'info');
+            stopTest();
+            return;
+        }
+
+        sentCount++;
+        const rawBody = document.getElementById('data').value;
+        const finalBody = parseBody(rawBody); // Generate nomor HP baru
+        const method = document.getElementById('method').value;
+        const targetUrl = document.getElementById('url').value;
+
+        let fetchOptions = { method: method };
+        let finalUrl = targetUrl;
+
+        if (method === 'POST') {
+            // jQuery defaultnya mengirim form-urlencoded
+            fetchOptions.headers = { 'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8' };
+            fetchOptions.body = finalBody;
+        } else {
+            finalUrl = targetUrl.includes('?') ? `${targetUrl}&${finalBody}` : `${targetUrl}?${finalBody}`;
+        }
+
+        document.getElementById('status').innerText = `Sending #${sentCount}...`;
+
+        fetch(finalUrl, fetchOptions)
+        .then(async res => {
+            const text = await res.text();
+            document.getElementById('preview').innerText = `Data Sent: ${finalBody}\n\nResponse:\n${text}`;
+            
+            // Cek status sukses (biasanya 200 OK)
+            if(res.ok) log(`OK (${res.status}) - ${finalBody}`, 'success');
+            else log(`Fail (${res.status})`, 'error');
+        })
+        .catch(err => {
+            log(`Error: ${err.message}`, 'error');
+            document.getElementById('preview').innerText = `Error connection: ${err.message}`;
+        })
+        .finally(() => {
+            if (isRunning) timer = setTimeout(processRequest, delayMs);
+        });
+    }
+</script>
+</body>
+</html>
