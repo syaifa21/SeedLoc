@@ -238,8 +238,9 @@ function buildWhere($table, $pdo) {
     if (!empty($_GET['search'])) { 
         $s = "%{$_GET['search']}%";
         if ($table == 'geotags') { 
-            $where[] = "(id LIKE ? OR itemType LIKE ? OR locationName LIKE ? OR details LIKE ? OR `condition` LIKE ? OR projectId LIKE ?)"; 
-            $p = array_fill(0, 6, $s);
+            // MODIFIKASI: Hanya mencari berdasarkan locationName
+            $where[] = "(locationName LIKE ?)"; 
+            $p = [$s]; 
         } 
         elseif ($table == 'projects') { 
             $where[] = "(activityName LIKE ? OR locationName LIKE ? OR officers LIKE ? OR projectId LIKE ?)"; 
@@ -293,7 +294,7 @@ if (in_array($action, ['list', 'gallery', 'map', 'users'])) {
         
         $stmt = $pdo->prepare("SELECT * FROM `$table` $w_sql ORDER BY `$pk` DESC LIMIT $per_page OFFSET $offset");
         $stmt->execute($p); $list_data = $stmt->fetchAll();
-        if ($table == 'geotags') $projects_list = $pdo->query("SELECT projectId, activityName FROM projects ORDER BY created_at DESC")->fetchAll();
+        if ($table == 'geotags') $projects_list = $pdo->query("SELECT projectId, activityName, locationName FROM projects ORDER BY created_at DESC")->fetchAll(); // AMBIL locationName
     }
 }
 ?>
@@ -410,7 +411,7 @@ if(isset($_SESSION['swal_warning'])){ echo "<script>Swal.fire({icon:'warning',ti
         <div class="header"><h2>Peta Sebaran Real-time (Full Data)</h2></div>
         <form class="filter-bar">
             <input type="hidden" name="action" value="map">
-            <input type="text" name="search" placeholder="Cari..." value="<?=htmlspecialchars($_GET['search']??'')?>" style="max-width:200px;">
+            <input type="text" name="search" placeholder="Cari ID, Jenis, Lokasi, Detail..." value="<?=htmlspecialchars($_GET['search']??'')?>" style="max-width:200px;">
             <select name="condition">
                 <option value="all" <?=($_GET['condition']??'')=='all'?'selected':''?>>Semua Kondisi</option>
                 <option value="Hidup" <?=($_GET['condition']??'')=='Hidup'?'selected':''?>>Hidup</option>
@@ -478,18 +479,21 @@ if(isset($_SESSION['swal_warning'])){ echo "<script>Swal.fire({icon:'warning',ti
         <?php if($action=='list'): ?>
         <form class="filter-bar">
             <input type="hidden" name="action" value="list"><input type="hidden" name="table" value="<?=$table?>">
-            <input type="text" name="search" placeholder="Cari ID, Jenis, Lokasi, Detail..." value="<?=htmlspecialchars($_GET['search']??'')?>" style="flex:1;">
             
             <?php if($table=='geotags'): ?>
+                <input type="text" name="search" placeholder="Cari berdasarkan Nama Lokasi..." value="<?=htmlspecialchars($_GET['search']??'')?>" style="flex:1;">
+                
                 <select name="projectId">
-                    <option value="all">Semua Project</option>
-                    <?php foreach($projects_list as $p) echo "<option value='{$p['projectId']}' ". (($_GET['projectId']??'') == $p['projectId'] ? 'selected' : '') .">{$p['activityName']}</option>"; ?>
+                    <option value="all">Semua Lokasi Project</option>
+                    <?php foreach($projects_list as $p) echo "<option value='{$p['projectId']}' ". (($_GET['projectId']??'') == $p['projectId'] ? 'selected' : '') .">{$p['locationName']}</option>"; ?>
                 </select>
                 <div style="display:flex;align-items:center;gap:5px;">
                     <input type="date" name="start_date" value="<?=htmlspecialchars($_GET['start_date']??'')?>"> 
                     - 
                     <input type="date" name="end_date" value="<?=htmlspecialchars($_GET['end_date']??'')?>">
                 </div>
+            <?php else: ?>
+                <input type="text" name="search" placeholder="Cari Project, Lokasi, Petugas..." value="<?=htmlspecialchars($_GET['search']??'')?>" style="flex:1;">
             <?php endif; ?>
             
             <button class="btn btn-b"><i class="fas fa-search"></i> Cari</button> <a href="?action=list&table=<?=$table?>" class="btn btn-d"><i class="fas fa-sync"></i></a>
