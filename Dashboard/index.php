@@ -1,5 +1,6 @@
 <?php
 // Dashboard/index.php - Updated: SEARCH ALL FIELDS (ID, Type, Location, Details, Condition, ProjectID)
+// Updated for Multi-Platform/Mobile Responsiveness
 
 require_once 'api/config.php';
 require_once 'api/db.php';
@@ -152,6 +153,9 @@ function build_url($params = []) {
 
         .main-content { flex: 1; overflow-y: auto; padding: 20px; display: flex; flex-direction: column; position: relative; }
         
+        .mobile-header { display: none; padding: 10px 0; align-items: center; gap: 15px; margin-bottom: 20px; } /* BARU */
+        .menu-toggle { background: var(--primary); color: white; border: none; padding: 8px 12px; border-radius: 6px; cursor: pointer; font-size: 16px; } /* BARU */
+
         .top-grid { display: grid; grid-template-columns: 3fr 1fr; gap: 20px; margin-bottom: 20px; }
         .card { background: var(--white); padding: 20px; border-radius: 12px; box-shadow: 0 2px 8px rgba(0,0,0,0.03); border: 1px solid var(--border); }
         
@@ -204,10 +208,47 @@ function build_url($params = []) {
         .modal-close { position: absolute; top: 20px; right: 30px; color: white; font-size: 30px; cursor: pointer; background: none; border: none; }
 
         @media (max-width: 900px) {
-            .top-grid { grid-template-columns: 1fr; }
-            .sidebar { width: 0; overflow: hidden; }
-            .sidebar.active { width: 260px; }
-            .side-panel { width: 100%; right: -100%; }
+            /* Perubahan Layout untuk Mobile/Tablet */
+            .sidebar { 
+                position: fixed; 
+                left: -260px; /* Sembunyikan sidebar di luar layar */
+                transition: left 0.3s ease; 
+                width: 260px;
+                box-shadow: 2px 0 5px rgba(0,0,0,0.1);
+            }
+            .sidebar.open { /* Tampilkan saat class 'open' ditambahkan */
+                left: 0; 
+            }
+            body { 
+                overflow-x: hidden; 
+            }
+
+            .main-content {
+                width: 100%; /* Pastikan konten utama menggunakan lebar penuh */
+                padding: 10px; /* Kurangi padding di mobile */
+            }
+
+            .mobile-header { 
+                display: flex; /* Tampilkan tombol toggle di mobile */
+                align-items: center; 
+                justify-content: space-between;
+                margin-bottom: 15px;
+            }
+
+            .top-grid { 
+                grid-template-columns: 1fr; /* Tumpuk card statistik */
+            }
+            .filter-bar {
+                flex-direction: column; /* Tumpuk filter inputs */
+                align-items: stretch;
+            }
+            .filter-group { 
+                min-width: 100%;
+            }
+            /* Memastikan Tabel dapat di-scroll horizontal */
+            .view-section table {
+                min-width: 600px; 
+            }
         }
     </style>
     <link rel="icon" href="https://seedloc.my.id/logo.png" type="image/png">
@@ -221,6 +262,7 @@ function build_url($params = []) {
                 <h2>SeedLoc</h2>
                 <p>Dashboard</p>
             </div>
+            <button class="sp-close" onclick="toggleSidebar()" style="position: absolute; right: 10px; color: var(--text); font-size: 20px; display: none; background: none; border: none; top: 15px;" id="sidebarCloseBtn">&times;</button>
         </div>
         <ul class="nav-links">
             <li>
@@ -229,7 +271,7 @@ function build_url($params = []) {
                 </a>
             </li>
             <li>
-                <a href="<?php echo build_url(['view'=>'table']); ?>" class="<?php echo $view==='table'?'active':''; ?>">
+                <a href="<?php echo build_url(['view'=>'table']); ?>" class="<?php echo $view==='table'?'active':''?>">
                     <i class="fas fa-table"></i> <span>Data Tabel</span>
                 </a>
             </li>
@@ -257,6 +299,12 @@ function build_url($params = []) {
 
     <main class="main-content">
         
+        <div class="mobile-header">
+            <button class="menu-toggle" onclick="toggleSidebar()"><i class="fas fa-bars"></i></button>
+            <h1 style="font-size: 1.2em; margin: 0; color: var(--primary);">SeedLoc Dashboard</h1>
+            <img src="https://seedloc.my.id/logo.png" width="30" height="30" alt="Logo">
+        </div>
+
         <div class="top-grid">
             <div class="card" style="border-left: 4px solid var(--primary); display: flex; flex-direction: column; justify-content: center;">
                 <h4 style="margin: 0 0 10px; color: var(--primary);"><i class="fas fa-info-circle"></i> Status Proyek Terkini</h4>
@@ -409,6 +457,25 @@ function build_url($params = []) {
         const photoBase = '<?php echo $photo_base_url; ?>';
         let map;
 
+        function toggleSidebar() {
+            const sidebar = document.getElementById('sidebar');
+            const closeBtn = document.getElementById('sidebarCloseBtn');
+            sidebar.classList.toggle('open');
+            // Tampilkan tombol tutup di sidebar hanya saat sidebar terbuka di mobile
+            if (window.innerWidth <= 900) {
+                closeBtn.style.display = sidebar.classList.contains('open') ? 'block' : 'none';
+            }
+        }
+        
+        // Sembunyikan sidebarCloseBtn pada desktop saat dimuat
+        document.addEventListener('DOMContentLoaded', () => {
+             if (window.innerWidth > 900) {
+                const closeBtn = document.getElementById('sidebarCloseBtn');
+                if (closeBtn) closeBtn.style.display = 'none';
+            }
+        });
+
+
         function initMap() {
             if(!document.getElementById('map')) return;
 
@@ -511,6 +578,11 @@ function build_url($params = []) {
                 <div class="sp-info-row"><span class="sp-label">Catatan</span><span class="sp-value" style="font-size:13px; line-height:1.4;">${data.details || '-'}</span></div>
             `;
             panel.classList.add('open');
+            
+            // Tambahkan event listener untuk menutup sidebar jika terbuka (jika di mobile)
+            if (window.innerWidth <= 900 && document.getElementById('sidebar').classList.contains('open')) {
+                toggleSidebar();
+            }
         }
 
         function openSidePanelByData(dataObj) { openSidePanel(dataObj); }

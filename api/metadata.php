@@ -16,6 +16,9 @@ return [
         'Peutag (Acemena acuminatissima)',
         'Saninten (Castanopsis argentea)',
         'Kemiri (Aleurites sp)',
+        'Huru (Litsea sp)',
+        'Beringin (Ficus spp)',
+        'Lainnnya'
     ],
     'locations' => [
         'Sayangkaak', 
