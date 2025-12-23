@@ -1,6 +1,6 @@
 <?php
 // admin.php - Dashboard Admin SeedLoc
-// Fix: Added "View Detail" Popup, Map Persistence, Search & No Pagination for Geotags
+// Fix: Delete Admin Logic & Update Search/CRUD
 
 session_start();
 
@@ -131,7 +131,14 @@ function require_auth() { if (!isset($_SESSION['auth']) || !$_SESSION['auth']) {
 
 // --- 5. CONTROLLER ---
 $action = $_GET['action'] ?? 'dashboard';
-$table = $_GET['table'] ?? 'geotags'; 
+
+// FIX: Pastikan $table benar saat action = 'users'
+if ($action === 'users') {
+    $table = 'admin_users';
+} else {
+    $table = $_GET['table'] ?? 'geotags'; 
+}
+
 $pk = ($table === 'projects') ? 'projectId' : 'id'; 
 
 if ($action === 'export_full') {
@@ -190,11 +197,25 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['csrf_token'])) {
                 $_SESSION['swal_success'] = "Data Admin berhasil disimpan"; header("Location: ?action=users"); exit; 
 
             } elseif ($table == 'geotags') {
-                $sql = isset($_POST['create']) 
-                    ? "INSERT INTO geotags (itemType, `condition`, details, locationName, latitude, longitude, isSynced, projectId) VALUES (?,?,?,?,?,?,?,?)"
-                    : "UPDATE geotags SET itemType=?, `condition`=?, details=?, locationName=?, latitude=?, longitude=?, isSynced=? WHERE id=?";
-                $params = [$_POST['itemType'], $_POST['condition'], $_POST['details'], $_POST['locationName'], $_POST['latitude'], $_POST['longitude'], $_POST['isSynced']];
-                if(isset($_POST['create'])) $params[] = $_POST['projectId']??0; else $params[] = $id;
+                $common_params = [
+                    $_POST['itemType'], 
+                    $_POST['condition'], 
+                    $_POST['details'], 
+                    $_POST['locationName'], 
+                    $_POST['latitude'], 
+                    $_POST['longitude'], 
+                    $_POST['isSynced'], 
+                    $_POST['projectId'] ?? 0
+                ];
+                
+                if (isset($_POST['create'])) {
+                    $sql = "INSERT INTO geotags (itemType, `condition`, details, locationName, latitude, longitude, isSynced, projectId) VALUES (?,?,?,?,?,?,?,?)";
+                    $params = $common_params;
+                } else {
+                    $sql = "UPDATE geotags SET itemType=?, `condition`=?, details=?, locationName=?, latitude=?, longitude=?, isSynced=?, projectId=? WHERE id=?";
+                    $params = $common_params;
+                    $params[] = $id; 
+                }
                 $pdo->prepare($sql)->execute($params);
             }
             $_SESSION['swal_success'] = "Data berhasil disimpan"; 
@@ -206,10 +227,20 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['csrf_token'])) {
         try {
             $id_to_delete = $_POST['delete_id'];
             if ($table == 'admin_users' && $id_to_delete == $_SESSION['admin_id']) throw new Exception("Tidak bisa menghapus diri sendiri!");
+            
+            // Delete logic sesuai table
             if($table=='geotags'){ $r=$pdo->query("SELECT photoPath FROM geotags WHERE id=$id_to_delete")->fetch(); if($r['photoPath']) @unlink($upload_dir.basename($r['photoPath'])); }
             if($table=='projects'){ $ps=$pdo->prepare("SELECT photoPath FROM geotags WHERE projectId=?"); $ps->execute([$id_to_delete]); while($ph=$ps->fetch()) @unlink($upload_dir.basename($ph['photoPath'])); $pdo->prepare("DELETE FROM geotags WHERE projectId = ?")->execute([$id_to_delete]); }
+            
+            // Execute delete
             $pdo->prepare("DELETE FROM `$table` WHERE `$pk` = ?")->execute([$id_to_delete]);
-            $_SESSION['swal_success'] = "Data berhasil dihapus"; header("Location: ?action=".($table=='admin_users'?'users':"list&table=$table")); exit;
+            
+            $_SESSION['swal_success'] = "Data berhasil dihapus"; 
+            
+            // Redirect sesuai halaman asal
+            if ($table == 'admin_users') header("Location: ?action=users");
+            else header("Location: ?action=list&table=$table");
+            exit;
         } catch(Exception $e) { $_SESSION['swal_error'] = $e->getMessage(); }
     }
 
@@ -232,15 +263,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['csrf_token'])) {
     }
 }
 
-// --- 6. VIEW HELPERS ---
+// --- 6. VIEW HELPERS & SEARCH LOGIC ---
 function buildWhere($table, $pdo) {
     $where = []; $p = [];
     if (!empty($_GET['search'])) { 
         $s = "%{$_GET['search']}%";
         if ($table == 'geotags') { 
-            // DIKEMBALIKAN: Pencarian menyeluruh (ID, Jenis, Lokasi, Detail, Kondisi, Project ID)
-            $where[] = "(id LIKE ? OR itemType LIKE ? OR locationName LIKE ? OR details LIKE ? OR `condition` LIKE ? OR projectId LIKE ?)"; 
-            $p = array_fill(0, 6, $s);
+            // FIX: Global search includes Officer Name from projects table
+            $where[] = "(geotags.id LIKE ? OR geotags.itemType LIKE ? OR geotags.locationName LIKE ? OR geotags.details LIKE ? OR geotags.condition LIKE ? OR geotags.projectId LIKE ? OR projects.officers LIKE ?)"; 
+            $p = array_fill(0, 7, $s);
         } 
         elseif ($table == 'projects') { 
             $where[] = "(activityName LIKE ? OR locationName LIKE ? OR officers LIKE ? OR projectId LIKE ?)"; 
@@ -248,9 +279,9 @@ function buildWhere($table, $pdo) {
         }
     }
     if ($table == 'geotags') {
-        if (!empty($_GET['condition']) && $_GET['condition'] != 'all') { $where[] = "`condition`=?"; $p[] = $_GET['condition']; }
-        if (!empty($_GET['projectId']) && $_GET['projectId'] != 'all') { $where[] = "projectId=?"; $p[] = $_GET['projectId']; }
-        if (!empty($_GET['start_date']) && !empty($_GET['end_date'])) { $where[] = "DATE(timestamp) BETWEEN ? AND ?"; $p[] = $_GET['start_date']; $p[] = $_GET['end_date']; }
+        if (!empty($_GET['condition']) && $_GET['condition'] != 'all') { $where[] = "geotags.condition=?"; $p[] = $_GET['condition']; }
+        if (!empty($_GET['projectId']) && $_GET['projectId'] != 'all') { $where[] = "geotags.projectId=?"; $p[] = $_GET['projectId']; }
+        if (!empty($_GET['start_date']) && !empty($_GET['end_date'])) { $where[] = "DATE(geotags.timestamp) BETWEEN ? AND ?"; $p[] = $_GET['start_date']; $p[] = $_GET['end_date']; }
     }
     return [$where, $p];
 }
@@ -263,11 +294,11 @@ if ($action === 'dashboard') {
     $stats['daily'] = $pdo->query("SELECT DATE(timestamp), COUNT(*) FROM geotags WHERE timestamp >= DATE(NOW()) - INTERVAL 7 DAY GROUP BY DATE(timestamp)")->fetchAll(PDO::FETCH_KEY_PAIR);
 }
 
-// --- LOGIKA PAGINATION ---
+// --- LOGIKA PAGINATION & QUERY ---
 $list_data = []; 
 $page = (int)($_GET['page'] ?? 1); 
 
-// Matikan Pagination khusus Geotags (Limit 9999999)
+// Matikan Pagination khusus Geotags
 if ($table === 'geotags' && $action === 'list') {
     $per_page = 9999999; 
 } else {
@@ -282,19 +313,42 @@ if (in_array($action, ['list', 'gallery', 'map', 'users'])) {
         $list_data = $pdo->query("SELECT * FROM admin_users ORDER BY id DESC")->fetchAll(); 
     } elseif ($action == 'map') {
         list($where, $p) = buildWhere('geotags', $pdo);
-        $sql = "SELECT id, latitude, longitude, itemType, `condition`, photoPath, locationName FROM geotags " . ($where ? "WHERE ".implode(' AND ', $where) : "") . " ORDER BY id DESC";
+        $w_sql = $where ? "WHERE ".implode(' AND ', $where) : "";
+        
+        $sql = "SELECT geotags.id, geotags.latitude, geotags.longitude, geotags.itemType, geotags.condition, geotags.photoPath, geotags.locationName 
+                FROM geotags 
+                LEFT JOIN projects ON geotags.projectId = projects.projectId 
+                $w_sql ORDER BY geotags.id DESC";
         $stmt = $pdo->prepare($sql); $stmt->execute($p); $map_data = $stmt->fetchAll();
     } else {
+        // MAIN LIST LOGIC
         list($where, $p) = buildWhere($table, $pdo);
         $w_sql = $where ? "WHERE ".implode(' AND ', $where) : "";
-        $total_stmt = $pdo->prepare("SELECT COUNT(*) FROM `$table` $w_sql"); $total_stmt->execute($p);
-        $total_rows = $total_stmt->fetchColumn(); $total_pages = ceil($total_rows / $per_page);
         
         $offset = ($page - 1) * $per_page;
         
-        $stmt = $pdo->prepare("SELECT * FROM `$table` $w_sql ORDER BY `$pk` DESC LIMIT $per_page OFFSET $offset");
-        $stmt->execute($p); $list_data = $stmt->fetchAll();
-        if ($table == 'geotags') $projects_list = $pdo->query("SELECT projectId, activityName, locationName FROM projects ORDER BY created_at DESC")->fetchAll(); 
+        if ($table == 'geotags') {
+            $total_stmt = $pdo->prepare("SELECT COUNT(*) FROM geotags LEFT JOIN projects ON geotags.projectId = projects.projectId $w_sql"); 
+            $total_stmt->execute($p);
+            $total_rows = $total_stmt->fetchColumn(); 
+            
+            $sql = "SELECT geotags.*, projects.officers 
+                    FROM geotags 
+                    LEFT JOIN projects ON geotags.projectId = projects.projectId 
+                    $w_sql 
+                    ORDER BY geotags.id DESC LIMIT $per_page OFFSET $offset";
+            $stmt = $pdo->prepare($sql);
+            $stmt->execute($p); 
+            $list_data = $stmt->fetchAll();
+            $projects_list = $pdo->query("SELECT projectId, activityName, locationName FROM projects ORDER BY created_at DESC")->fetchAll(); 
+
+        } else {
+            $total_stmt = $pdo->prepare("SELECT COUNT(*) FROM `$table` $w_sql"); $total_stmt->execute($p);
+            $total_rows = $total_stmt->fetchColumn(); 
+            $stmt = $pdo->prepare("SELECT * FROM `$table` $w_sql ORDER BY `$pk` DESC LIMIT $per_page OFFSET $offset");
+            $stmt->execute($p); $list_data = $stmt->fetchAll();
+        }
+        $total_pages = ceil($total_rows / $per_page);
     }
 }
 ?>
@@ -411,7 +465,7 @@ if(isset($_SESSION['swal_warning'])){ echo "<script>Swal.fire({icon:'warning',ti
         <div class="header"><h2>Peta Sebaran Real-time (Full Data)</h2></div>
         <form class="filter-bar">
             <input type="hidden" name="action" value="map">
-            <input type="text" name="search" placeholder="Cari ID, Jenis, Lokasi, Detail..." value="<?=htmlspecialchars($_GET['search']??'')?>" style="max-width:200px;">
+            <input type="text" name="search" placeholder="Cari ID, Petugas, Lokasi, Detail..." value="<?=htmlspecialchars($_GET['search']??'')?>" style="max-width:200px;">
             <select name="condition">
                 <option value="all" <?=($_GET['condition']??'')=='all'?'selected':''?>>Semua Kondisi</option>
                 <option value="Hidup" <?=($_GET['condition']??'')=='Hidup'?'selected':''?>>Hidup</option>
@@ -481,7 +535,7 @@ if(isset($_SESSION['swal_warning'])){ echo "<script>Swal.fire({icon:'warning',ti
             <input type="hidden" name="action" value="list"><input type="hidden" name="table" value="<?=$table?>">
             
             <?php if($table=='geotags'): ?>
-                <input type="text" name="search" placeholder="Cari ID, Jenis, Lokasi, Detail..." value="<?=htmlspecialchars($_GET['search']??'')?>" style="flex:1;">
+                <input type="text" name="search" placeholder="Cari ID, Jenis, Lokasi, Petugas, Detail..." value="<?=htmlspecialchars($_GET['search']??'')?>" style="flex:1;">
                 
                 <select name="projectId">
                     <option value="all">Semua Lokasi Project</option>
@@ -536,7 +590,7 @@ if(isset($_SESSION['swal_warning'])){ echo "<script>Swal.fire({icon:'warning',ti
                         <tr>
                             <?php if($table=='geotags'): ?><th width="30"><input type="checkbox" onclick="toggle(this)"></th><?php endif; ?>
                             <?php if($table=='geotags'): ?>
-                                <th>Foto</th><th>ID</th><th>Jenis</th><th>Lokasi</th><th>Tanggal</th><th>Kondisi</th>
+                                <th>Foto</th><th>ID</th><th>Jenis</th><th>Petugas</th><th>Lokasi</th><th>Tanggal</th><th>Kondisi</th>
                             <?php else: ?>
                                 <th>ID</th><th>Nama Kegiatan</th><th>Lokasi Project</th><th>Petugas</th><th>Status</th>
                             <?php endif; ?>
@@ -554,6 +608,7 @@ if(isset($_SESSION['swal_warning'])){ echo "<script>Swal.fire({icon:'warning',ti
                                 <td><?php if($i):?><img src="<?=$i?>" width="45" height="45" style="object-fit:cover;border-radius:4px;cursor:pointer;border:1px solid #ddd;" onclick="viewDetail(<?=htmlspecialchars(json_encode($r), ENT_QUOTES, 'UTF-8')?>)"><?php else: ?>-<?php endif; ?></td>
                                 <td>#<?=$r['id']?></td>
                                 <td><b><?=$r['itemType']?></b></td>
+                                <td><small style="color:#1565c0;font-weight:600;"><i class="fas fa-user-tag"></i> <?=$r['officers'] ?? '-'?></small></td>
                                 <td><?=$r['locationName']?></td>
                                 <td><?=substr($r['timestamp'],0,10)?></td>
                                 <td>
@@ -801,7 +856,7 @@ if(isset($_SESSION['swal_warning'])){ echo "<script>Swal.fire({icon:'warning',ti
         document.getElementById('modalCaption').innerHTML=c;
     }
 
-    // FIX: New View Detail Function
+    // FIX: New View Detail Function (Added Officer to Detail View as well)
     function viewDetail(data) {
         var photoUrl = data.photoPath ? (data.photoPath.startsWith('http') ? data.photoPath : '<?=$photo_base_url?>' + data.photoPath) : '';
         var color = data.condition == 'Hidup' || data.condition == 'Baik' ? '#2E7D32' : (data.condition == 'Mati' ? '#c62828' : '#f39c12');
@@ -812,6 +867,7 @@ if(isset($_SESSION['swal_warning'])){ echo "<script>Swal.fire({icon:'warning',ti
             </div>
             <table style="width:100%; border-collapse:collapse;">
                 <tr><td style="padding:8px 0; color:#666; font-size:12px; font-weight:bold; width:100px;">JENIS POHON</td><td style="font-weight:bold; font-size:15px;">${data.itemType}</td></tr>
+                <tr><td style="padding:8px 0; color:#666; font-size:12px; font-weight:bold;">PETUGAS</td><td><i class="fas fa-user"></i> ${data.officers || '-'}</td></tr>
                 <tr><td style="padding:8px 0; color:#666; font-size:12px; font-weight:bold;">LOKASI</td><td><i class="fas fa-map-marker-alt" style="color:#d32f2f"></i> ${data.locationName}</td></tr>
                 <tr><td style="padding:8px 0; color:#666; font-size:12px; font-weight:bold;">KONDISI</td><td><span class="status-badge" style="background:${color}; color:#fff;">${data.condition}</span></td></tr>
                 <tr><td style="padding:8px 0; color:#666; font-size:12px; font-weight:bold;">KOORDINAT</td><td style="font-family:monospace;">${parseFloat(data.latitude).toFixed(6)}, ${parseFloat(data.longitude).toFixed(6)}</td></tr>
