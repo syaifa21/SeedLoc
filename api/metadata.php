@@ -13,11 +13,14 @@ return [
         'Kiteja (Cinnamomum iners)',
         'Picung/Kluwek (Pangium edule)',
         'Manglid (Magnolia blumei)',
-        'Peutag (Acemena acuminatissima)',
+        'Peutag (Syzygium acuminatissimum)',
         'Saninten (Castanopsis argentea)',
-        'Kemiri (Aleurites sp)',
+        'Kemiri (Aleurites mollucana)',
         'Huru (Litsea sp)',
-        'Beringin (Ficus spp)',
+        'Beringin (Ficus benjamina)',
+        'Solatri (Callophyllum soulattri',
+        'Kiputih (Terennoides wallichi)',
+        'Picung (Pangium edule)',
         'Lainnnya'
     ],
     'locations' => [

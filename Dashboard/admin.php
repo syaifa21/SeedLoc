@@ -1,6 +1,6 @@
 <?php
 // admin.php - Dashboard Admin SeedLoc
-// Fix: Delete Admin Logic & Update Search/CRUD
+// Fix: Support Upload KML & KMZ (Auto Extract KMZ)
 
 session_start();
 
@@ -31,7 +31,14 @@ if (isset($manual_connect)) {
 }
 
 $photo_base_url = 'https://seedloc.my.id/api/'; 
-$upload_dir = __DIR__ . '/../api/uploads/'; 
+// Pastikan path upload absolut
+$upload_dir = realpath(__DIR__ . '/api/uploads') . DIRECTORY_SEPARATOR;
+if (!$upload_dir || !file_exists($upload_dir)) { $upload_dir = __DIR__ . '/api/uploads/'; }
+
+// --- KONFIGURASI LAYER ---
+// Apapun yang diupload (KML/KMZ) akan disimpan/dikonversi menjadi file ini:
+$kml_file_path = $upload_dir . 'admin_layer.kml'; 
+$kml_url_path = 'api/uploads/admin_layer.kml'; 
 
 // --- 2. LOAD METADATA ---
 $metadata_path = realpath(__DIR__ . '/api/metadata.php');
@@ -52,7 +59,7 @@ function get_photo_url($path, $base) {
 
 function build_url($params = []) {
     $current = $_GET;
-    if(isset($params['action']) && $params['action'] !== ($current['action'] ?? '')) {
+    if((isset($params['search']) || isset($params['condition']) || isset($params['projectId'])) && !isset($params['page'])) {
         unset($current['page']);
     }
     $query = array_merge($current, $params);
@@ -86,7 +93,8 @@ function export_data($pdo, $ids, $type, $base_url, $upload_dir, $full_project_id
         while($r = $stmt->fetch()) {
             $p = $r['photoPath']; if (empty($p)) continue;
             $cleanType = preg_replace('/[^A-Za-z0-9]/', '_', $r['itemType']);
-            $zipInternalName = $r['id'] . '_' . $cleanType . '.jpg';
+            $cleanLoc  = preg_replace('/[^A-Za-z0-9]/', '_', $r['locationName']); // Tamb
+            $zipInternalName = $r['id'] . $cleanLoc. '_' . $cleanType . '.jpg';
             if (strpos($p, 'http') === 0) {
                 $content = @file_get_contents($p); if ($content) { $zip->addFromString($zipInternalName, $content); $count++; }
             } else {
@@ -128,17 +136,11 @@ if (isset($_SESSION['auth']) && $_SESSION['auth'] === true) {
 }
 if (!isset($_SESSION['csrf_token'])) $_SESSION['csrf_token'] = bin2hex(random_bytes(32));
 function require_auth() { if (!isset($_SESSION['auth']) || !$_SESSION['auth']) { header('Location: ?action=login'); exit; } }
+function is_admin() { return (isset($_SESSION['admin_role']) && $_SESSION['admin_role'] === 'Admin'); }
 
 // --- 5. CONTROLLER ---
 $action = $_GET['action'] ?? 'dashboard';
-
-// FIX: Pastikan $table benar saat action = 'users'
-if ($action === 'users') {
-    $table = 'admin_users';
-} else {
-    $table = $_GET['table'] ?? 'geotags'; 
-}
-
+if ($action === 'users') { $table = 'admin_users'; } else { $table = $_GET['table'] ?? 'geotags'; }
 $pk = ($table === 'projects') ? 'projectId' : 'id'; 
 
 if ($action === 'export_full') {
@@ -152,7 +154,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['login'])) {
     $stmt = $pdo->prepare("SELECT * FROM admin_users WHERE username = ?"); $stmt->execute([$_POST['username']??'']); $user = $stmt->fetch();
     if ($user && password_verify($_POST['password']??'', $user['password_hash'])) {
         $_SESSION['auth'] = true; $_SESSION['auth_time'] = time();
-        $_SESSION['admin_id'] = $user['id']; $_SESSION['admin_username'] = $user['username'];
+        $_SESSION['admin_id'] = $user['id']; 
+        $_SESSION['admin_username'] = $user['username'];
+        $_SESSION['admin_role'] = $user['role'];
         $_SESSION['swal_success'] = "Login Berhasil"; header('Location: admin.php'); exit;
     } else { $_SESSION['swal_error'] = 'Username atau Password salah'; }
 }
@@ -163,6 +167,71 @@ if ($action !== 'login') require_auth();
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['csrf_token'])) {
     if (!hash_equals($_SESSION['csrf_token'], $_POST['csrf_token'])) die('CSRF Validation Failed');
     
+    // --- KML/KMZ UPLOAD LOGIC ---
+    if (isset($_POST['upload_kml'])) {
+        if (!is_admin()) { $_SESSION['swal_error'] = "Akses Ditolak!"; header("Location: ?action=layers"); exit; }
+        
+        $file = $_FILES['kml_file'];
+        $ext = strtolower(pathinfo($file['name'], PATHINFO_EXTENSION));
+
+        // Cek Error Upload PHP
+        if ($file['error'] !== UPLOAD_ERR_OK) {
+            $_SESSION['swal_error'] = "Upload Error Code: " . $file['error'];
+        } 
+        // Cek Permission Folder
+        elseif (!is_writable($upload_dir)) {
+            $_SESSION['swal_error'] = "Server permission denied pada folder: $upload_dir";
+        }
+        else {
+            // PROSES FILE KML
+            if ($ext === 'kml') {
+                if(move_uploaded_file($file['tmp_name'], $kml_file_path)) {
+                    $_SESSION['swal_success'] = "Layer KML berhasil diupload!";
+                } else {
+                    $_SESSION['swal_error'] = "Gagal memindahkan file KML.";
+                }
+            } 
+            // PROSES FILE KMZ (UNZIP)
+            elseif ($ext === 'kmz') {
+                if (!class_exists('ZipArchive')) {
+                    $_SESSION['swal_error'] = "Fitur KMZ butuh ekstensi PHP ZipArchive.";
+                } else {
+                    $zip = new ZipArchive;
+                    if ($zip->open($file['tmp_name']) === TRUE) {
+                        $foundKml = false;
+                        // Cari file .kml di dalam zip
+                        for($i = 0; $i < $zip->numFiles; $i++) {
+                            $entryName = $zip->getNameIndex($i);
+                            if (strtolower(pathinfo($entryName, PATHINFO_EXTENSION)) === 'kml') {
+                                // Ekstrak file kml tersebut ke target path
+                                copy("zip://".$file['tmp_name']."#".$entryName, $kml_file_path);
+                                $foundKml = true;
+                                break; // Ambil yang pertama ketemu
+                            }
+                        }
+                        $zip->close();
+                        
+                        if($foundKml) $_SESSION['swal_success'] = "Layer KMZ berhasil diekstrak dan diaktifkan!";
+                        else $_SESSION['swal_error'] = "File KMZ valid, tapi tidak ditemukan file .kml di dalamnya.";
+                    } else {
+                        $_SESSION['swal_error'] = "Gagal membuka file KMZ (Corrupt/Invalid Zip).";
+                    }
+                }
+            } else {
+                $_SESSION['swal_error'] = "Format file harus .kml atau .kmz";
+            }
+        }
+        header("Location: ?action=layers"); exit;
+    }
+
+    // --- KML DELETE (Admin Only) ---
+    if (isset($_POST['delete_kml'])) {
+        if (!is_admin()) { $_SESSION['swal_error'] = "Akses Ditolak!"; header("Location: ?action=layers"); exit; }
+        if (file_exists($kml_file_path)) unlink($kml_file_path);
+        $_SESSION['swal_success'] = "Layer dihapus.";
+        header("Location: ?action=layers"); exit;
+    }
+
     if (isset($_POST['update']) || isset($_POST['create'])) {
         try {
             $id = $_POST[$pk] ?? null; 
@@ -197,24 +266,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['csrf_token'])) {
                 $_SESSION['swal_success'] = "Data Admin berhasil disimpan"; header("Location: ?action=users"); exit; 
 
             } elseif ($table == 'geotags') {
-                $common_params = [
-                    $_POST['itemType'], 
-                    $_POST['condition'], 
-                    $_POST['details'], 
-                    $_POST['locationName'], 
-                    $_POST['latitude'], 
-                    $_POST['longitude'], 
-                    $_POST['isSynced'], 
-                    $_POST['projectId'] ?? 0
-                ];
-                
+                $common_params = [$_POST['itemType'], $_POST['condition'], $_POST['details'], $_POST['locationName'], $_POST['latitude'], $_POST['longitude'], $_POST['isSynced'], $_POST['projectId'] ?? 0];
                 if (isset($_POST['create'])) {
                     $sql = "INSERT INTO geotags (itemType, `condition`, details, locationName, latitude, longitude, isSynced, projectId) VALUES (?,?,?,?,?,?,?,?)";
                     $params = $common_params;
                 } else {
                     $sql = "UPDATE geotags SET itemType=?, `condition`=?, details=?, locationName=?, latitude=?, longitude=?, isSynced=?, projectId=? WHERE id=?";
-                    $params = $common_params;
-                    $params[] = $id; 
+                    $params = $common_params; $params[] = $id; 
                 }
                 $pdo->prepare($sql)->execute($params);
             }
@@ -227,20 +285,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['csrf_token'])) {
         try {
             $id_to_delete = $_POST['delete_id'];
             if ($table == 'admin_users' && $id_to_delete == $_SESSION['admin_id']) throw new Exception("Tidak bisa menghapus diri sendiri!");
-            
-            // Delete logic sesuai table
             if($table=='geotags'){ $r=$pdo->query("SELECT photoPath FROM geotags WHERE id=$id_to_delete")->fetch(); if($r['photoPath']) @unlink($upload_dir.basename($r['photoPath'])); }
             if($table=='projects'){ $ps=$pdo->prepare("SELECT photoPath FROM geotags WHERE projectId=?"); $ps->execute([$id_to_delete]); while($ph=$ps->fetch()) @unlink($upload_dir.basename($ph['photoPath'])); $pdo->prepare("DELETE FROM geotags WHERE projectId = ?")->execute([$id_to_delete]); }
-            
-            // Execute delete
             $pdo->prepare("DELETE FROM `$table` WHERE `$pk` = ?")->execute([$id_to_delete]);
-            
             $_SESSION['swal_success'] = "Data berhasil dihapus"; 
-            
-            // Redirect sesuai halaman asal
-            if ($table == 'admin_users') header("Location: ?action=users");
-            else header("Location: ?action=list&table=$table");
-            exit;
+            if ($table == 'admin_users') header("Location: ?action=users"); else header("Location: ?action=list&table=$table"); exit;
         } catch(Exception $e) { $_SESSION['swal_error'] = $e->getMessage(); }
     }
 
@@ -269,7 +318,6 @@ function buildWhere($table, $pdo) {
     if (!empty($_GET['search'])) { 
         $s = "%{$_GET['search']}%";
         if ($table == 'geotags') { 
-            // FIX: Global search includes Officer Name from projects table
             $where[] = "(geotags.id LIKE ? OR geotags.itemType LIKE ? OR geotags.locationName LIKE ? OR geotags.details LIKE ? OR geotags.condition LIKE ? OR geotags.projectId LIKE ? OR projects.officers LIKE ?)"; 
             $p = array_fill(0, 7, $s);
         } 
@@ -297,15 +345,9 @@ if ($action === 'dashboard') {
 // --- LOGIKA PAGINATION & QUERY ---
 $list_data = []; 
 $page = (int)($_GET['page'] ?? 1); 
-
-// Matikan Pagination khusus Geotags
-if ($table === 'geotags' && $action === 'list') {
-    $per_page = 9999999; 
-} else {
-    $per_page = 20; 
-}
-
+$per_page = 25; // Pagination 25 data
 $total_pages = 1; 
+
 if ($page < 1) $page = 1;
 
 if (in_array($action, ['list', 'gallery', 'map', 'users'])) {
@@ -314,17 +356,13 @@ if (in_array($action, ['list', 'gallery', 'map', 'users'])) {
     } elseif ($action == 'map') {
         list($where, $p) = buildWhere('geotags', $pdo);
         $w_sql = $where ? "WHERE ".implode(' AND ', $where) : "";
-        
         $sql = "SELECT geotags.id, geotags.latitude, geotags.longitude, geotags.itemType, geotags.condition, geotags.photoPath, geotags.locationName 
-                FROM geotags 
-                LEFT JOIN projects ON geotags.projectId = projects.projectId 
+                FROM geotags LEFT JOIN projects ON geotags.projectId = projects.projectId 
                 $w_sql ORDER BY geotags.id DESC";
         $stmt = $pdo->prepare($sql); $stmt->execute($p); $map_data = $stmt->fetchAll();
     } else {
-        // MAIN LIST LOGIC
         list($where, $p) = buildWhere($table, $pdo);
         $w_sql = $where ? "WHERE ".implode(' AND ', $where) : "";
-        
         $offset = ($page - 1) * $per_page;
         
         if ($table == 'geotags') {
@@ -332,16 +370,10 @@ if (in_array($action, ['list', 'gallery', 'map', 'users'])) {
             $total_stmt->execute($p);
             $total_rows = $total_stmt->fetchColumn(); 
             
-            $sql = "SELECT geotags.*, projects.officers 
-                    FROM geotags 
-                    LEFT JOIN projects ON geotags.projectId = projects.projectId 
-                    $w_sql 
-                    ORDER BY geotags.id DESC LIMIT $per_page OFFSET $offset";
-            $stmt = $pdo->prepare($sql);
-            $stmt->execute($p); 
-            $list_data = $stmt->fetchAll();
+            $sql = "SELECT geotags.*, projects.officers FROM geotags LEFT JOIN projects ON geotags.projectId = projects.projectId 
+                    $w_sql ORDER BY geotags.id DESC LIMIT $per_page OFFSET $offset";
+            $stmt = $pdo->prepare($sql); $stmt->execute($p); $list_data = $stmt->fetchAll();
             $projects_list = $pdo->query("SELECT projectId, activityName, locationName FROM projects ORDER BY created_at DESC")->fetchAll(); 
-
         } else {
             $total_stmt = $pdo->prepare("SELECT COUNT(*) FROM `$table` $w_sql"); $total_stmt->execute($p);
             $total_rows = $total_stmt->fetchColumn(); 
@@ -365,6 +397,7 @@ if (in_array($action, ['list', 'gallery', 'map', 'users'])) {
     <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.4.1/dist/MarkerCluster.Default.css" />
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
     <script src="https://unpkg.com/leaflet.markercluster@1.4.1/dist/leaflet.markercluster.js"></script>
+    <script src='https://cdnjs.cloudflare.com/ajax/libs/leaflet-omnivore/0.3.4/leaflet-omnivore.min.js'></script>
     
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
@@ -381,6 +414,14 @@ if (in_array($action, ['list', 'gallery', 'map', 'users'])) {
         .btn{padding:8px 14px;border:none;border-radius:6px;color:#fff;cursor:pointer;text-decoration:none;font-size:14px;display:inline-flex;align-items:center;gap:5px;font-weight:600;transition:opacity 0.2s}
         .btn:hover{opacity:0.9}
         .btn-p{background:#2E7D32} .btn-d{background:#d32f2f} .btn-w{background:#f39c12} .btn-b{background:#2196f3} .btn-i{background:#1565c0}
+        
+        /* Pagination Style */
+        .pagination { display: flex; justify-content: center; gap: 5px; margin-top: 20px; flex-wrap: wrap; }
+        .pagination a { padding: 8px 12px; border: 1px solid #ddd; background: #fff; color: #333; text-decoration: none; border-radius: 4px; font-size: 14px; transition: all 0.2s; }
+        .pagination a:hover { background: #f0f0f0; }
+        .pagination a.active { background: #2E7D32; color: #fff; border-color: #2E7D32; pointer-events: none; }
+        .pagination a.disabled { color: #ccc; pointer-events: none; border-color: #eee; }
+
         table{width:100%;border-collapse:collapse;font-size:14px} 
         th{background:#f8f9fa;font-weight:600;color:#666;text-transform:uppercase;font-size:12px;letter-spacing:0.5px}
         th,td{padding:12px 15px;border-bottom:1px solid #eee;text-align:left;vertical-align:middle}
@@ -393,6 +434,22 @@ if (in_array($action, ['list', 'gallery', 'map', 'users'])) {
         .status-badge{padding:4px 8px;border-radius:4px;font-size:11px;font-weight:bold;text-transform:uppercase}
         .status-Active{background:#e8f5e9;color:#2E7D32} .status-Completed{background:#e3f2fd;color:#1976d2}
         .custom-div-icon div { width:100%; height:100%; border-radius:50%; border:2px solid white; box-shadow:0 0 3px black; }
+        
+        /* Custom Map Button */
+        .custom-map-btn {
+            background-color: white;
+            width: 30px;
+            height: 30px;
+            line-height: 30px;
+            text-align: center;
+            border-radius: 4px;
+            cursor: pointer;
+            box-shadow: 0 1px 5px rgba(0,0,0,0.65);
+            font-size: 14px;
+            color: #333;
+        }
+        .custom-map-btn:hover { background-color: #f4f4f4; color: #2E7D32; }
+
         @media(max-width:768px){.sidebar{width:60px}.brand span,.nav span{display:none}.brand{justify-content:center;padding:15px}.nav a{justify-content:center;padding:15px}}
     </style>
 </head>
@@ -429,6 +486,7 @@ if(isset($_SESSION['swal_warning'])){ echo "<script>Swal.fire({icon:'warning',ti
     <ul class="nav">
         <li><a href="<?=build_url(['action'=>'dashboard'])?>" class="<?=$action=='dashboard'?'active':''?>"><i class="fas fa-chart-pie"></i> <span>Dashboard</span></a></li>
         <li><a href="<?=build_url(['action'=>'map'])?>" class="<?=$action=='map'?'active':''?>"><i class="fas fa-map-marked-alt"></i> <span>Peta Sebaran</span></a></li>
+        <li><a href="<?=build_url(['action'=>'layers'])?>" class="<?=$action=='layers'?'active':''?>"><i class="fas fa-layer-group"></i> <span>Lapisan Overlay</span></a></li>
         <li><a href="<?=build_url(['action'=>'list', 'table'=>'projects'])?>" class="<?=($action=='list'&&$table=='projects')?'active':''?>"><i class="fas fa-folder-open"></i> <span>Data Projects</span></a></li>
         <li><a href="<?=build_url(['action'=>'list', 'table'=>'geotags'])?>" class="<?=($action=='list'&&$table=='geotags')?'active':''?>"><i class="fas fa-leaf"></i> <span>Data Geotags</span></a></li>
         <li><a href="<?=build_url(['action'=>'gallery'])?>" class="<?=$action=='gallery'?'active':''?>"><i class="fas fa-images"></i> <span>Galeri Foto</span></a></li>
@@ -462,7 +520,8 @@ if(isset($_SESSION['swal_warning'])){ echo "<script>Swal.fire({icon:'warning',ti
         </script>
 
     <?php elseif($action === 'map'): ?>
-        <div class="header"><h2>Peta Sebaran Real-time (Full Data)</h2></div>
+        <div class="header"><h2>Peta Sebaran Real-time</h2></div>
+        
         <form class="filter-bar">
             <input type="hidden" name="action" value="map">
             <input type="text" name="search" placeholder="Cari ID, Petugas, Lokasi, Detail..." value="<?=htmlspecialchars($_GET['search']??'')?>" style="max-width:200px;">
@@ -491,7 +550,52 @@ if(isset($_SESSION['swal_warning'])){ echo "<script>Swal.fire({icon:'warning',ti
             if (savedLayer === 'Satelit') { m.addLayer(satellite); } else { m.addLayer(streets); }
 
             var baseMaps = { "Peta Jalan": streets, "Satelit": satellite };
-            L.control.layers(baseMaps).addTo(m);
+            
+            // --- KML LAYER HANDLING ---
+            <?php if(file_exists($kml_file_path)): ?>
+                var kmlUrl = '<?=$kml_url_path?>?t=<?=time()?>'; // Cache buster
+                console.log("Loading KML from: " + kmlUrl);
+                
+                var customLayer = omnivore.kml(kmlUrl)
+                    .on('ready', function() {
+                        console.log("KML Loaded Successfully");
+                        this.addTo(m); // Explicitly add to map
+                        this.eachLayer(function(layer) {
+                            if (layer.feature && layer.feature.properties) {
+                                var desc = layer.feature.properties.description || layer.feature.properties.name || "Area Project";
+                                layer.bindPopup(desc);
+                            }
+                        });
+                    })
+                    .on('error', function(e) {
+                        console.error("KML Error:", e);
+                    });
+
+                var overlayMaps = { "Layer Overlay": customLayer };
+                L.control.layers(baseMaps, overlayMaps).addTo(m);
+
+                // --- ADD CUSTOM ZOOM TO LAYER BUTTON ---
+                var zoomControl = L.Control.extend({
+                    options: { position: 'topright' },
+                    onAdd: function (map) {
+                        var container = L.DomUtil.create('div', 'custom-map-btn leaflet-bar leaflet-control');
+                        container.innerHTML = '<i class="fas fa-expand-arrows-alt"></i>';
+                        container.title = "Fokus ke Layer";
+                        container.onclick = function(){
+                            if(customLayer && customLayer.getBounds().isValid()){
+                                map.fitBounds(customLayer.getBounds());
+                            } else {
+                                Swal.fire('Info', 'Layer tidak ditemukan atau kosong.', 'info');
+                            }
+                        };
+                        return container;
+                    }
+                });
+                m.addControl(new zoomControl());
+
+            <?php else: ?>
+                L.control.layers(baseMaps).addTo(m);
+            <?php endif; ?>
 
             m.on('baselayerchange', function(e) { localStorage.setItem('SelectedLayer', e.name); });
 
@@ -521,8 +625,56 @@ if(isset($_SESSION['swal_warning'])){ echo "<script>Swal.fire({icon:'warning',ti
                 }
             });
             m.addLayer(markers);
-            if(bounds.length) m.fitBounds(bounds, {padding:[50,50]});
+            <?php if(!file_exists($kml_file_path)): ?>
+                if(bounds.length) m.fitBounds(bounds, {padding:[50,50]});
+            <?php endif; ?>
         </script>
+
+    <?php elseif($action === 'layers'): ?>
+        <div class="header"><h2>Manajemen Lapisan Overlay</h2></div>
+        
+        <div class="card" style="max-width: 600px; margin: 0 auto;">
+            <div style="text-align: center; margin-bottom: 20px;">
+                <i class="fas fa-map-marked-alt fa-3x" style="color: #2E7D32; margin-bottom: 10px;"></i>
+                <p>Upload file <b>.kml</b> atau <b>.kmz</b> untuk menampilkan area batas atau layer tambahan di Peta Sebaran.</p>
+            </div>
+
+            <?php if(file_exists($kml_file_path)): ?>
+                <div style="background:#e8f5e9; padding:15px; border-radius:8px; border:1px solid #c8e6c9; margin-bottom:20px; text-align: center;">
+                    <h3 style="margin:0 0 5px 0; color:#2E7D32;">Status: Layer Aktif</h3>
+                    <p style="margin:0; font-size:14px; color:#666;">File terpasang: <b>admin_layer.kml</b></p>
+                    <p style="margin:5px 0 0 0; font-size:12px; color:#888;">Diperbarui: <?=date("d F Y, H:i", filemtime($kml_file_path))?></p>
+                </div>
+                
+                <?php if(is_admin()): ?>
+                    <form method="post" style="text-align: center;">
+                        <input type="hidden" name="csrf_token" value="<?=$_SESSION['csrf_token']?>">
+                        <button type="submit" name="delete_kml" class="btn btn-d"><i class="fas fa-trash"></i> Hapus Layer Saat Ini</button>
+                    </form>
+                    <hr style="margin: 20px 0; border: 0; border-top: 1px solid #eee;">
+                    <p style="text-align: center; font-size: 14px; color: #666;">Ingin mengganti layer? Upload file baru di bawah ini:</p>
+                <?php endif; ?>
+            <?php else: ?>
+                <div style="background:#f5f5f5; padding:15px; border-radius:8px; border:1px solid #ddd; margin-bottom:20px; text-align: center; color: #666;">
+                    Status: <b>Belum ada layer terpasang</b>
+                </div>
+            <?php endif; ?>
+
+            <?php if(is_admin()): ?>
+                <form method="post" enctype="multipart/form-data" style="background: #fafafa; padding: 20px; border-radius: 8px; border: 1px dashed #ccc;">
+                    <input type="hidden" name="csrf_token" value="<?=$_SESSION['csrf_token']?>">
+                    <div style="margin-bottom: 15px;">
+                        <label style="font-weight: bold; display: block; margin-bottom: 5px;">Pilih File (KML / KMZ)</label>
+                        <input type="file" name="kml_file" accept=".kml,.kmz" required style="width: 100%; padding: 10px; background: #fff; border: 1px solid #ddd; border-radius: 4px;">
+                    </div>
+                    <button type="submit" name="upload_kml" class="btn btn-p" style="width: 100%; justify-content: center;"><i class="fas fa-cloud-upload-alt"></i> Upload Layer</button>
+                </form>
+            <?php else: ?>
+                <div style="text-align: center; color: #d32f2f; background: #ffebee; padding: 10px; border-radius: 4px;">
+                    <i class="fas fa-lock"></i> Hanya Admin yang dapat mengubah layer.
+                </div>
+            <?php endif; ?>
+        </div>
 
     <?php elseif(in_array($action, ['list', 'users'])): ?>
         <div class="header">
@@ -682,13 +834,30 @@ if(isset($_SESSION['swal_warning'])){ echo "<script>Swal.fire({icon:'warning',ti
             </form>
         <?php endif; ?>
         
-        <?php if($table !== 'geotags' || $action !== 'list'): ?>
-        <div style="display:flex;justify-content:center;gap:8px;margin-top:20px;">
+        <?php 
+        // GLOBAL PAGINATION UI
+        if($action === 'list' && $total_pages > 1): 
+            $queryParams = $_GET;
+            unset($queryParams['page']);
+        ?>
+        <div class="pagination">
+            <a href="?<?=http_build_query(array_merge($queryParams, ['page' => max(1, $page-1)]))?>" class="<?=($page<=1)?'disabled':''?>">&laquo; Prev</a>
+            
             <?php 
-            $q = $_GET; 
-            if($page > 1) { $q['page'] = $page - 1; echo '<a href="?'.http_build_query($q).'" class="btn btn-p" style="background:#fff;color:#333;border:1px solid #ddd;">&laquo; Prev</a>'; }
-            if($page < $total_pages) { $q['page'] = $page + 1; echo '<a href="?'.http_build_query($q).'" class="btn btn-p" style="background:#fff;color:#333;border:1px solid #ddd;">Next &raquo;</a>'; } 
+            $range = 2; 
+            $start = max(1, $page - $range);
+            $end = min($total_pages, $page + $range);
+            
+            if($start > 1) { echo '<a href="?'.http_build_query(array_merge($queryParams, ['page'=>1])).'">1</a>'; if($start > 2) echo '<span style="padding:8px;">...</span>'; }
+
+            for($i = $start; $i <= $end; $i++): ?>
+                <a href="?<?=http_build_query(array_merge($queryParams, ['page' => $i]))?>" class="<?=($i==$page)?'active':''?>"><?=$i?></a>
+            <?php endfor; 
+
+            if($end < $total_pages) { if($end < $total_pages-1) echo '<span style="padding:8px;">...</span>'; echo '<a href="?'.http_build_query(array_merge($queryParams, ['page'=>$total_pages])).'">'.$total_pages.'</a>'; }
             ?>
+
+            <a href="?<?=http_build_query(array_merge($queryParams, ['page' => min($total_pages, $page+1)]))?>" class="<?=($page>=$total_pages)?'disabled':''?>">Next &raquo;</a>
         </div>
         <?php endif; ?>
 
@@ -724,7 +893,13 @@ if(isset($_SESSION['swal_warning'])){ echo "<script>Swal.fire({icon:'warning',ti
             </div>
             <?php endforeach; endif; ?>
         </div>
-        <div style="display:flex;justify-content:center;gap:5px;margin-top:20px;"><?php $q=$_GET; if($page>1){$q['page']=$page-1; echo '<a href="?'.http_build_query($q).'" class="btn btn-p">Prev</a>';} if($page<$total_pages){$q['page']=$page+1; echo '<a href="?'.http_build_query($q).'" class="btn btn-p">Next</a>';} ?></div>
+        <div style="display:flex;justify-content:center;gap:5px;margin-top:20px;">
+            <?php if($total_pages > 1): 
+                $q=$_GET; 
+                if($page>1){$q['page']=$page-1; echo '<a href="?'.http_build_query($q).'" class="btn btn-p">Prev</a>';} 
+                if($page<$total_pages){$q['page']=$page+1; echo '<a href="?'.http_build_query($q).'" class="btn btn-p">Next</a>';} 
+            endif; ?>
+        </div>
 
     <?php elseif($action === 'edit' || $action === 'create'): 
         $is_edit = ($action=='edit');
