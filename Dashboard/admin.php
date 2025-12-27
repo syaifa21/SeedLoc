@@ -1,6 +1,6 @@
 <?php
 // admin.php - Dashboard Admin SeedLoc
-// Fix: Support Upload KML & KMZ (Auto Extract KMZ)
+// Fix: Support Upload KML & KMZ (Auto Extract KMZ) + Bar Chart Location
 
 session_start();
 
@@ -94,7 +94,7 @@ function export_data($pdo, $ids, $type, $base_url, $upload_dir, $full_project_id
             $p = $r['photoPath']; if (empty($p)) continue;
             $cleanType = preg_replace('/[^A-Za-z0-9]/', '_', $r['itemType']);
             $cleanLoc  = preg_replace('/[^A-Za-z0-9]/', '_', $r['locationName']); // Tamb
-            $zipInternalName = $r['id'] . $cleanLoc. '_' . $cleanType . '.jpg';
+            $zipInternalName = $r['id'] .'_'. $cleanLoc. '_' . $cleanType . '.jpg';
             if (strpos($p, 'http') === 0) {
                 $content = @file_get_contents($p); if ($content) { $zip->addFromString($zipInternalName, $content); $count++; }
             } else {
@@ -340,6 +340,8 @@ if ($action === 'dashboard') {
     $stats['projects'] = $pdo->query("SELECT COUNT(*) FROM projects")->fetchColumn();
     $stats['cond'] = $pdo->query("SELECT `condition`, COUNT(*) FROM geotags GROUP BY `condition`")->fetchAll(PDO::FETCH_KEY_PAIR);
     $stats['daily'] = $pdo->query("SELECT DATE(timestamp), COUNT(*) FROM geotags WHERE timestamp >= DATE(NOW()) - INTERVAL 7 DAY GROUP BY DATE(timestamp)")->fetchAll(PDO::FETCH_KEY_PAIR);
+    // NEW: DATA PER LOCATION
+    $stats['loc_stats'] = $pdo->query("SELECT locationName, COUNT(*) FROM geotags GROUP BY locationName ORDER BY COUNT(*) DESC")->fetchAll(PDO::FETCH_KEY_PAIR);
 }
 
 // --- LOGIKA PAGINATION & QUERY ---
@@ -510,13 +512,46 @@ if(isset($_SESSION['swal_warning'])){ echo "<script>Swal.fire({icon:'warning',ti
                 <div><h2 style="margin:0;font-size:28px;"><?=$stats['projects']?></h2><small style="color:#888;">Active Projects</small></div>
             </div>
         </div>
-        <div style="display:flex;gap:20px;flex-wrap:wrap;">
+        
+        <div style="display:flex;gap:20px;flex-wrap:wrap;margin-bottom:20px;">
             <div class="card" style="flex:1;min-width:300px;"><h4>Kondisi Tanaman</h4><canvas id="c1"></canvas></div>
             <div class="card" style="flex:2;min-width:400px;"><h4>Aktivitas Harian</h4><canvas id="c2"></canvas></div>
         </div>
+
+        <div class="card" style="width:100%; box-sizing:border-box;">
+            <h4>Jumlah Data per Lokasi</h4>
+            <div style="height:350px;">
+                <canvas id="c3"></canvas>
+            </div>
+        </div>
+
         <script>
             new Chart(document.getElementById('c1'),{type:'doughnut',data:{labels:<?=json_encode(array_keys($stats['cond']))?>,datasets:[{data:<?=json_encode(array_values($stats['cond']))?>,backgroundColor:['#4caf50','#ffeb3b','#f44336','#ff9800']}]}});
             new Chart(document.getElementById('c2'),{type:'line',data:{labels:<?=json_encode(array_keys($stats['daily']))?>,datasets:[{label:'Geotag Masuk',data:<?=json_encode(array_values($stats['daily']))?>,borderColor:'#2E7D32',tension:0.3,fill:true,backgroundColor:'rgba(46,125,50,0.1)'}]}});
+            
+            // Konfigurasi Bar Chart Lokasi
+            new Chart(document.getElementById('c3'), {
+                type: 'bar',
+                data: {
+                    labels: <?=json_encode(array_keys($stats['loc_stats']))?>,
+                    datasets: [{
+                        label: 'Jumlah Data',
+                        data: <?=json_encode(array_values($stats['loc_stats']))?>,
+                        backgroundColor: '#1976d2',
+                        borderRadius: 4
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    scales: {
+                        y: {
+                            beginAtZero: true,
+                            ticks: { precision: 0 }
+                        }
+                    }
+                }
+            });
         </script>
 
     <?php elseif($action === 'map'): ?>
@@ -542,6 +577,8 @@ if(isset($_SESSION['swal_warning'])){ echo "<script>Swal.fire({icon:'warning',ti
             <div id="map" style="height:650px;"></div>
         </div>
         <script>
+
+            
             var m = L.map('map').setView([-6.2, 106.8], 5);
             var streets = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { attribution: '&copy; OpenStreetMap' });
             var satellite = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', { attribution: '&copy; Esri' });
@@ -711,9 +748,9 @@ if(isset($_SESSION['swal_warning'])){ echo "<script>Swal.fire({icon:'warning',ti
                 ?>
                 <div style="display:flex; gap:5px; align-items:center; background:#e8f5e9; padding:5px 10px; border-radius:6px; margin-left:auto;">
                     <span style="font-size:11px; font-weight:bold; color:#2E7D32; text-transform:uppercase;">Export (<?=$labelExport?>):</span>
-                    <a href="?action=export_full&projectId=<?=$currProj?>&type=csv" target="_blank" class="btn btn-i" style="padding:4px 8px; font-size:11px;" title="CSV"><i class="fas fa-file-csv"></i> CSV</a>
-                    <a href="?action=export_full&projectId=<?=$currProj?>&type=download_zip" target="_blank" class="btn btn-w" style="padding:4px 8px; font-size:11px;" title="Foto ZIP"><i class="fas fa-file-archive"></i> ZIP</a>
-                    <a href="?action=export_full&projectId=<?=$currProj?>&type=kml" target="_blank" class="btn btn-b" style="padding:4px 8px; font-size:11px;" title="KML"><i class="fas fa-map"></i> KML</a>
+                    <a href="javascript:void(0)" onclick="downloadExport('csv', '<?=$currProj?>')" class="btn btn-i" style="padding:4px 8px; font-size:11px;" title="CSV"><i class="fas fa-file-csv"></i> CSV</a>
+                    <a href="javascript:void(0)" onclick="downloadExport('download_zip', '<?=$currProj?>')" class="btn btn-w" style="padding:4px 8px; font-size:11px;" title="Foto ZIP"><i class="fas fa-file-archive"></i> ZIP</a>
+                    <a href="javascript:void(0)" onclick="downloadExport('kml', '<?=$currProj?>')" class="btn btn-b" style="padding:4px 8px; font-size:11px;" title="KML"><i class="fas fa-map"></i> KML</a>
                 </div>
             <?php endif; ?>
         </form>
@@ -1022,6 +1059,86 @@ if(isset($_SESSION['swal_warning'])){ echo "<script>Swal.fire({icon:'warning',ti
 <div id="imgModal" class="modal" onclick="this.style.display='none'"><img class="modal-content" id="modalImg"><div id="modalCaption" style="color:#fff;margin-top:15px;font-size:16px;background:rgba(0,0,0,0.5);padding:5px 15px;border-radius:20px;"></div></div>
 
 <script>
+async function downloadExport(type, projectId) {
+    // 1. Tampilkan Popup Progress Awal
+    let popup = Swal.fire({
+        title: 'Export Data',
+        html: `
+            <div style="text-align:left; margin-bottom:5px; font-weight:bold;" id="progress-label">Menyiapkan data di server...</div>
+            <progress id="export-progress" value="0" max="100" style="width: 100%; height: 20px;"></progress>
+            <div id="progress-text" style="font-size:12px; color:#666; margin-top:5px;">Mohon tunggu...</div>
+        `,
+        allowOutsideClick: false,
+        showConfirmButton: false,
+        didOpen: () => { Swal.showLoading(); } // Spinner saat server memproses
+    });
+
+    try {
+        const response = await fetch(`?action=export_full&projectId=${projectId}&type=${type}`);
+
+        if (!response.ok) throw new Error('Gagal menghubungi server.');
+
+        // 2. Persiapan Baca Data (Stream)
+        const reader = response.body.getReader();
+        const contentLength = +response.headers.get('Content-Length'); // Total ukuran file (jika ada)
+        
+        // Ambil nama file dari header
+        const disposition = response.headers.get('Content-Disposition');
+        let filename = 'Export_Data.' + (type === 'download_zip' ? 'zip' : (type === 'kml' ? 'kml' : 'csv'));
+        if (disposition) {
+            const matches = /filename[^;=\n]*=((['"]).*?\2|[^;\n]*)/.exec(disposition);
+            if (matches != null && matches[1]) filename = matches[1].replace(/['"]/g, '');
+        }
+
+        // 3. Mulai Download & Update Progress Bar
+        Swal.hideLoading(); // Hilangkan spinner, ganti ke progress bar aktif
+        let receivedLength = 0;
+        let chunks = [];
+        
+        while(true) {
+            const {done, value} = await reader.read();
+            if (done) break;
+
+            chunks.push(value);
+            receivedLength += value.length;
+
+            // Update UI Progress
+            const progressBar = document.getElementById('export-progress');
+            const progressText = document.getElementById('progress-text');
+            const progressLabel = document.getElementById('progress-label');
+
+            progressLabel.innerText = "Mengunduh file...";
+            
+            if (contentLength) {
+                // Jika server mengirim ukuran file (biasanya ZIP)
+                const percent = Math.round((receivedLength / contentLength) * 100);
+                progressBar.value = percent;
+                progressText.innerText = `${percent}% (${(receivedLength/1024/1024).toFixed(2)} MB)`;
+            } else {
+                // Jika ukuran tidak diketahui (CSV/KML seringkali chunked)
+                progressBar.removeAttribute('value'); // Mode loading bar gerak terus
+                progressText.innerText = `Terunduh: ${(receivedLength/1024).toFixed(0)} KB`;
+            }
+        }
+
+        // 4. Gabungkan Data & Download Otomatis
+        const blob = new Blob(chunks);
+        const url = window.URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = filename;
+        document.body.appendChild(a);
+        a.click();
+        window.URL.revokeObjectURL(url);
+        document.body.removeChild(a);
+
+        Swal.fire({ icon: 'success', title: 'Selesai!', text: 'File berhasil disimpan.', timer: 1500, showConfirmButton: false });
+
+    } catch (err) {
+        console.error(err);
+        Swal.fire({ icon: 'error', title: 'Gagal', text: 'Terjadi kesalahan saat mengunduh data.' });
+    }
+}
     function toggle(s){var c=document.querySelectorAll('input[name="selected_ids[]"]');for(var i=0;i<c.length;i++)c[i].checked=s.checked;}
     
     // Original Show Modal for Images (from Gallery)
