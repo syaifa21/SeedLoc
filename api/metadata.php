@@ -18,9 +18,8 @@ return [
         'Kemiri (Aleurites mollucana)',
         'Huru (Litsea sp)',
         'Beringin (Ficus benjamina)',
-        'Solatri (Callophyllum soulattri',
+        'Solatri (Callophyllum soulattri)',
         'Kiputih (Terennoides wallichi)',
-        'Picung (Pangium edule)',
         'Lainnnya'
     ],
     'locations' => [

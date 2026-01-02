@@ -36,7 +36,8 @@ function buildWhere($table, $pdo) {
     return [$where, $p];
 }
 
-function export_data($pdo, $ids, $type, $base_url, $upload_dir, $full_project_id = null) {
+// Updated to receive photo_dir specifically
+function export_data($pdo, $ids, $type, $base_url, $photo_dir, $full_project_id = null) {
     if ($full_project_id) {
         $sql = ($full_project_id === 'all') ? "SELECT * FROM geotags ORDER BY id DESC" : "SELECT * FROM geotags WHERE projectId = ? ORDER BY id DESC";
         $params = ($full_project_id === 'all') ? [] : [$full_project_id];
@@ -68,7 +69,9 @@ function export_data($pdo, $ids, $type, $base_url, $upload_dir, $full_project_id
             if (strpos($p, 'http') === 0) {
                 $content = @file_get_contents($p); if ($content) { $zip->addFromString($zipInternalName, $content); $count++; }
             } else {
-                $filePath = $upload_dir . basename($p); if (file_exists($filePath)) { $zip->addFile($filePath, $zipInternalName); $count++; }
+                // Read from PHOTO DIR
+                $filePath = $photo_dir . basename($p); 
+                if (file_exists($filePath)) { $zip->addFile($filePath, $zipInternalName); $count++; }
             }
         }
         $zip->close();
@@ -98,4 +101,4 @@ function export_data($pdo, $ids, $type, $base_url, $upload_dir, $full_project_id
         echo '</Document></kml>'; exit;
     }
 }
-?>
+?> 

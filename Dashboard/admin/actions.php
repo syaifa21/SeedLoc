@@ -5,7 +5,7 @@
 if ($action === 'export_full') {
     require_auth();
     $pid = $_GET['projectId'] ?? 'all'; $type = $_GET['type'] ?? 'csv';
-    if (in_array($type, ['csv', 'download_zip', 'kml'])) export_data($pdo, [], $type, $photo_base_url, $upload_dir, $pid);
+    if (in_array($type, ['csv', 'download_zip', 'kml'])) export_data($pdo, [], $type, $photo_base_url, $photo_dir, $pid);
     else { $_SESSION['swal_error'] = "Parameter salah."; header("Location: ?action=list&table=geotags"); exit; }
 }
 
@@ -31,16 +31,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if (isset($_POST['csrf_token'])) {
         if (!hash_equals($_SESSION['csrf_token'], $_POST['csrf_token'])) die('CSRF Validation Failed');
         
-        require_auth(); // Ensure login for operations below
+        require_auth(); 
 
-        // 2. KML UPLOAD
+        // 2. KML UPLOAD (FIXED: Upload ke folder admin)
         if (isset($_POST['upload_kml'])) {
             if (!is_admin()) { $_SESSION['swal_error'] = "Akses Ditolak!"; header("Location: ?action=layers"); exit; }
             $file = $_FILES['kml_file'];
             $ext = strtolower(pathinfo($file['name'], PATHINFO_EXTENSION));
 
             if ($file['error'] !== UPLOAD_ERR_OK) { $_SESSION['swal_error'] = "Upload Error Code: " . $file['error']; } 
-            elseif (!is_writable($upload_dir)) { $_SESSION['swal_error'] = "Permission denied: $upload_dir"; }
+            elseif (!is_writable($layer_dir)) { $_SESSION['swal_error'] = "Permission denied pada folder admin ($layer_dir). Coba chmod 755."; }
             else {
                 if ($ext === 'kml') {
                     if(move_uploaded_file($file['tmp_name'], $kml_file_path)) $_SESSION['swal_success'] = "Layer KML berhasil diupload!";
@@ -132,29 +132,41 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             } catch(Exception $e) { $_SESSION['swal_error'] = $e->getMessage(); }
         }
 
-        // 5. DELETE
+        // 5. DELETE (FIXED: Pakai $photo_dir untuk hapus foto)
         if (isset($_POST['delete'])) {
             try {
                 $id_to_delete = $_POST['delete_id'];
                 if ($table == 'admin_users' && $id_to_delete == $_SESSION['admin_id']) throw new Exception("Tidak bisa menghapus diri sendiri!");
-                if($table=='geotags'){ $r=$pdo->query("SELECT photoPath FROM geotags WHERE id=$id_to_delete")->fetch(); if($r['photoPath']) @unlink($upload_dir.basename($r['photoPath'])); }
-                if($table=='projects'){ $ps=$pdo->prepare("SELECT photoPath FROM geotags WHERE projectId=?"); $ps->execute([$id_to_delete]); while($ph=$ps->fetch()) @unlink($upload_dir.basename($ph['photoPath'])); $pdo->prepare("DELETE FROM geotags WHERE projectId = ?")->execute([$id_to_delete]); }
+                
+                if($table=='geotags'){ 
+                    $r=$pdo->query("SELECT photoPath FROM geotags WHERE id=$id_to_delete")->fetch(); 
+                    if($r['photoPath']) @unlink($photo_dir.basename($r['photoPath'])); 
+                }
+                if($table=='projects'){ 
+                    $ps=$pdo->prepare("SELECT photoPath FROM geotags WHERE projectId=?"); $ps->execute([$id_to_delete]); 
+                    while($ph=$ps->fetch()) @unlink($photo_dir.basename($ph['photoPath'])); 
+                    $pdo->prepare("DELETE FROM geotags WHERE projectId = ?")->execute([$id_to_delete]); 
+                }
+                
                 $pdo->prepare("DELETE FROM `$table` WHERE `$pk` = ?")->execute([$id_to_delete]);
                 $_SESSION['swal_success'] = "Data berhasil dihapus"; 
                 if ($table == 'admin_users') header("Location: ?action=users"); else header("Location: ?action=list&table=$table"); exit;
             } catch(Exception $e) { $_SESSION['swal_error'] = $e->getMessage(); }
         }
 
-        // 6. BULK ACTIONS
+        // 6. BULK ACTIONS (FIXED: Pakai $photo_dir untuk export/hapus)
         if (isset($_POST['bulk_action'])) {
             $ids = $_POST['selected_ids'] ?? []; $type = $_POST['bulk_action_type'] ?? '';
             if (!empty($ids)) {
-                if ($type == 'download_zip' && $table == 'geotags') export_data($pdo, $ids, 'download_zip', $photo_base_url, $upload_dir);
-                elseif ($type == 'export_csv' && $table == 'geotags') export_data($pdo, $ids, 'csv', $photo_base_url, $upload_dir);
-                elseif ($type == 'export_kml' && $table == 'geotags') export_data($pdo, $ids, 'kml', $photo_base_url, $upload_dir);
+                if ($type == 'download_zip' && $table == 'geotags') export_data($pdo, $ids, 'download_zip', $photo_base_url, $photo_dir);
+                elseif ($type == 'export_csv' && $table == 'geotags') export_data($pdo, $ids, 'csv', $photo_base_url, $photo_dir);
+                elseif ($type == 'export_kml' && $table == 'geotags') export_data($pdo, $ids, 'kml', $photo_base_url, $photo_dir);
                 elseif ($type == 'delete_selected') {
                     $ph = implode(',', array_fill(0, count($ids), '?'));
-                    if($table=='geotags'){ $f=$pdo->prepare("SELECT photoPath FROM geotags WHERE id IN ($ph)"); $f->execute($ids); while($r=$f->fetch()) if($r['photoPath']) @unlink($upload_dir.basename($r['photoPath'])); }
+                    if($table=='geotags'){ 
+                        $f=$pdo->prepare("SELECT photoPath FROM geotags WHERE id IN ($ph)"); $f->execute($ids); 
+                        while($r=$f->fetch()) if($r['photoPath']) @unlink($photo_dir.basename($r['photoPath'])); 
+                    }
                     $pdo->prepare("DELETE FROM `$table` WHERE `$pk` IN ($ph)")->execute($ids);
                     $_SESSION['swal_success'] = count($ids) . " data dihapus"; header("Location: ?action=list&table=$table"); exit;
                 } elseif ($type == 'mark_synced' && $table == 'geotags') {
@@ -165,7 +177,5 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
     }
 }
-
-// Ensure auth is required for everything except login page
 if ($action !== 'login') require_auth();
 ?>

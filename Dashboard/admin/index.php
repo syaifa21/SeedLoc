@@ -91,6 +91,7 @@ if(isset($_SESSION['swal_warning'])){ echo "<script>Swal.fire({icon:'warning',ti
     <div class="brand"><img src="https://seedloc.my.id/logo.png" width="32"> <span>SeedLoc</span></div>
     <ul class="nav">
         <li><a href="<?=build_url(['action'=>'dashboard'])?>" class="<?=$action=='dashboard'?'active':''?>"><i class="fas fa-chart-pie"></i> <span>Dashboard</span></a></li>
+        <li><a href="<?=build_url(['action'=>'monitor'])?>" class="<?=$action=='monitor'?'active':''?>"><i class="fas fa-bullseye"></i> <span>Monitoring Target</span></a></li>
         <li><a href="<?=build_url(['action'=>'map'])?>" class="<?=$action=='map'?'active':''?>"><i class="fas fa-map-marked-alt"></i> <span>Peta Sebaran</span></a></li>
         <li><a href="<?=build_url(['action'=>'layers'])?>" class="<?=$action=='layers'?'active':''?>"><i class="fas fa-layer-group"></i> <span>Lapisan Overlay</span></a></li>
         <li><a href="<?=build_url(['action'=>'list', 'table'=>'projects'])?>" class="<?=($action=='list'&&$table=='projects')?'active':''?>"><i class="fas fa-folder-open"></i> <span>Data Projects</span></a></li>
@@ -143,7 +144,68 @@ if(isset($_SESSION['swal_warning'])){ echo "<script>Swal.fire({icon:'warning',ti
             new Chart(document.getElementById('c2'),{type:'line',data:{labels:<?=json_encode(array_keys($stats['daily']))?>,datasets:[{label:'Geotag Masuk',data:<?=json_encode(array_values($stats['daily']))?>,borderColor:'#2E7D32',tension:0.3,fill:true,backgroundColor:'rgba(46,125,50,0.1)'}]}});
             new Chart(document.getElementById('c3'), {type: 'bar',data: {labels: <?=json_encode(array_keys($stats['loc_stats']))?>,datasets: [{label: 'Jumlah Data',data: <?=json_encode(array_values($stats['loc_stats']))?>,backgroundColor: '#1976d2',borderRadius: 4}]},options: {responsive: true,maintainAspectRatio: false,scales: {y: {beginAtZero: true,ticks: { precision: 0 }}} }});
         </script>
+<?php elseif($action === 'monitor'): ?>
+        <div class="header"><h2>Monitoring Target Penanaman</h2></div>
+        
+        <div class="card" style="min-height: 500px;">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:20px; border-bottom:1px solid #eee; padding-bottom:15px;">
+                <label style="font-weight:bold; color:#666;">Pilih Lokasi:</label>
+                <select id="locationSelect" onchange="switchTable(this.value)" style="padding:10px; border:1px solid #2E7D32; border-radius:5px; font-weight:bold; color:#2E7D32; min-width:200px; cursor:pointer; outline:none;">
+                    <?php 
+                    $first_id = '';
+                    foreach ($loc_keys as $id => $name): 
+                        if ($first_id === '') $first_id = $id;
+                    ?>
+                        <option value="<?= $id ?>"><?= htmlspecialchars($name) ?></option>
+                    <?php endforeach; ?>
+                </select>
+            </div>
 
+            <?php foreach ($monitoring_tables as $id => $rows): ?>
+                <div id="<?= $id ?>" class="monitor-table" style="display: <?= ($id === $first_id) ? 'block' : 'none' ?>; animation: fadeIn 0.4s;">
+                    <table class="table">
+                        <thead>
+                            <tr style="background:#f1f8e9; text-transform:uppercase; font-size:12px; letter-spacing:0.5px;">
+                                <th style="padding:15px;">Jenis Bibit</th>
+                                <th style="text-align:center;">Target</th>
+                                <th style="text-align:center;">Tertanam</th>
+                                <th style="width:40%;">Progress Realisasi</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <?php foreach ($rows as $r): 
+                                $color = $r['percent'] < 50 ? '#c62828' : ($r['percent'] < 100 ? '#f57f17' : '#2E7D32');
+                            ?>
+                            <tr style="border-bottom:1px solid #f0f0f0;">
+                                <td style="padding:15px; font-weight:bold;"><?= $r['jenis'] ?></td>
+                                <td style="text-align:center; vertical-align:middle; color:#666;"><?= number_format($r['target']) ?></td>
+                                <td style="text-align:center; vertical-align:middle; font-size:16px; font-weight:bold; color:#333;"><?= number_format($r['real']) ?></td>
+                                <td style="vertical-align:middle; padding:15px;">
+                                    <div style="display:flex; align-items:center; gap:15px;">
+                                        <div style="flex:1; background:#eee; height:10px; border-radius:10px; overflow:hidden;">
+                                            <div style="width:<?= $r['percent'] > 100 ? 100 : $r['percent'] ?>%; background:<?= $color ?>; height:100%; transition: width 1s ease-in-out;"></div>
+                                        </div>
+                                        <span style="font-size:13px; font-weight:bold; color:<?= $color ?>; width:45px; text-align:right;"><?= $r['percent'] ?>%</span>
+                                    </div>
+                                </td>
+                            </tr>
+                            <?php endforeach; ?>
+                            <?php if(empty($rows)): ?>
+                                <tr><td colspan="4" style="text-align:center; padding:30px; color:#999;">Belum ada target bibit di lokasi ini.</td></tr>
+                            <?php endif; ?>
+                        </tbody>
+                    </table>
+                </div>
+            <?php endforeach; ?>
+        </div>
+
+        <script>
+            function switchTable(id) {
+                document.querySelectorAll('.monitor-table').forEach(el => el.style.display = 'none');
+                if(document.getElementById(id)) document.getElementById(id).style.display = 'block';
+            }
+        </script>
+        <style>@keyframes fadeIn { from { opacity:0; transform:translateY(10px); } to { opacity:1; transform:translateY(0); } }</style>
     <?php elseif($action === 'map'): ?>
         <div class="header"><h2>Peta Sebaran Real-time</h2></div>
         <form class="filter-bar">

@@ -30,14 +30,17 @@ if (isset($manual_connect)) {
 
 // --- CONFIG PATHS ---
 $photo_base_url = 'https://seedloc.my.id/api/'; 
-$upload_dir = realpath(__DIR__ . '/api/uploads') . DIRECTORY_SEPARATOR;
-if (!$upload_dir || !file_exists($upload_dir)) { $upload_dir = __DIR__ . '/api/uploads/'; }
 
-$kml_file_path = $upload_dir . 'admin_layer.kml'; 
-$kml_url_path = 'api/uploads/admin_layer.kml'; 
+// Path untuk FOTO Geotag (Tetap di folder API)
+$photo_dir = realpath(__DIR__ . '/../api/uploads') . DIRECTORY_SEPARATOR;
 
-// --- METADATA ---
-$metadata_path = realpath(__DIR__ . '/api/metadata.php');
+// Path untuk LAYER KML (FIX: Disimpan di folder Admin ini saja)
+$layer_dir = __DIR__ . DIRECTORY_SEPARATOR;
+$kml_file_path = $layer_dir . 'admin_layer.kml'; 
+$kml_url_path = 'admin_layer.kml'; // URL Relatif terhadap index.php
+
+// --- 2. LOAD METADATA ---
+$metadata_path = realpath(__DIR__ . '/..//api/metadata.php');
 if ($metadata_path && file_exists($metadata_path)) {
     $metadata = require $metadata_path;
     $tree_types = $metadata['treeTypes'] ?? [];

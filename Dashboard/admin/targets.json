@@ -1,0 +1,46 @@
+{
+  "K5": {
+    "Aren (Arenga pinnata)": 1000,
+    "Kemiri (Aleurites mollucana)": 2000,
+    "Puspa (Schima wallichii)": 1000,
+    "Huru (Litsea sp)": 7000,
+    "Beringin (Ficus benjamina)": 1000,
+    "Salam (Syzygium polyanthum)": 1200
+  },
+  "K2": {
+   "Aren (Arenga pinnata)": 1000,
+    "Kemiri (Aleurites mollucana)": 2000,
+    "Puspa (Schima wallichii)": 1000,
+    "Huru (Litsea sp)": 7000,
+    "Beringin (Ficus benjamina)": 1000,
+    "Salam (Syzygium polyanthum)": 1200
+  },
+  "Batu Ngadapang": {
+    "Aren (Arenga pinnata)": 2000,
+    "Kemiri (Aleurites moluccana)": 1400,
+    "Puspa (Schima wallichii)": 500,
+    "Huru (Litsea sp)": 1100,
+    "Beringin (Ficus benjamina)": 1000,
+    "Salam (Syzygium polyanthum)": 600
+  },
+  "Simpang Angin": {
+    "Puspa (Schima wallichii)": 2500,
+    "Huru (Litsea sp)": 2500,
+    "Salam (Syzygium polyanthum)": 2000,
+    "Aren (Arenga pinnata)": 2000,
+    "Beringin (Ficus benjamina)": 2200,
+    "Kiteja (Scolopia spinosa)": 2000
+  },
+  "Sayangkaak": {
+    "Kiteja (Cinnamomum iners)": 2500,
+    "Picung/Kluwek (Pangium edule)": 3700,
+    "Salam (Syzygium polyanthum)": 1000,
+    "Manglid (Magnolia blumei)": 9800,
+    "Peutag (Syzygium acuminatissimum)": 700,
+    "Kiputih (Terennoides wallichi)": 500,
+    "Solatri (Callophyllum soulattri)": 400,
+    "Saninten (Castanopsis argentea)": 200,
+    "Huru (Litsea sp)": 600,
+    "Puspa (Schima wallichii)": 400
+  }
+}
