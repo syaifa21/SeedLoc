@@ -1,6 +1,6 @@
 <?php
 // admin.php - Dashboard Admin SeedLoc
-// Fix: Support Upload KML & KMZ (Auto Extract KMZ) + Bar Chart Location
+// Fix: Menjaga filter pencarian & halaman saat Edit data (Kode Lengkap tanpa potongan)
 
 session_start();
 
@@ -57,8 +57,10 @@ function get_photo_url($path, $base) {
     return (strpos($path, 'http') === 0) ? $path : $base . $path;
 }
 
+// FIX: Helper untuk membuat URL dinamis (mempertahankan query params saat pindah halaman/edit)
 function build_url($params = []) {
     $current = $_GET;
+    // Reset page jika user melakukan pencarian/filter baru
     if((isset($params['search']) || isset($params['condition']) || isset($params['projectId'])) && !isset($params['page'])) {
         unset($current['page']);
     }
@@ -232,6 +234,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['csrf_token'])) {
         header("Location: ?action=layers"); exit;
     }
 
+    // --- CREATE / UPDATE LOGIC (FIX: REDIRECT) ---
     if (isset($_POST['update']) || isset($_POST['create'])) {
         try {
             $id = $_POST[$pk] ?? null; 
@@ -277,7 +280,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['csrf_token'])) {
                 $pdo->prepare($sql)->execute($params);
             }
             $_SESSION['swal_success'] = "Data berhasil disimpan"; 
-            if($table != 'admin_users') { header("Location: ?action=list&table=$table"); exit; }
+            
+            // FIX: REDIRECT INTELLIGENTLY (RESTORE FILTERS)
+            if($table != 'admin_users') {
+                $redirect_query = ['action'=>'list', 'table'=>$table];
+                // Ambil filter dari hidden input 'ret_*'
+                foreach(['search','page','condition','projectId','start_date','end_date'] as $k) {
+                    if(!empty($_POST['ret_'.$k])) $redirect_query[$k] = $_POST['ret_'.$k];
+                }
+                header("Location: ?" . http_build_query($redirect_query)); 
+                exit; 
+            }
+
         } catch(Exception $e) { $_SESSION['swal_error'] = $e->getMessage(); }
     }
 
@@ -342,12 +356,21 @@ if ($action === 'dashboard') {
     $stats['daily'] = $pdo->query("SELECT DATE(timestamp), COUNT(*) FROM geotags WHERE timestamp >= DATE(NOW()) - INTERVAL 7 DAY GROUP BY DATE(timestamp)")->fetchAll(PDO::FETCH_KEY_PAIR);
     // NEW: DATA PER LOCATION
     $stats['loc_stats'] = $pdo->query("SELECT locationName, COUNT(*) FROM geotags GROUP BY locationName ORDER BY COUNT(*) DESC")->fetchAll(PDO::FETCH_KEY_PAIR);
+// Mengambil total semua data per petugas tanpa filter target
+    $stats['officer_stats'] = $pdo->query("
+        SELECT projects.officers, COUNT(geotags.id) as total 
+        FROM geotags 
+        LEFT JOIN projects ON geotags.projectId = projects.projectId 
+        WHERE projects.officers IS NOT NULL AND projects.officers != ''
+        GROUP BY projects.officers 
+        ORDER BY total DESC
+    ")->fetchAll();
 }
 
 // --- LOGIKA PAGINATION & QUERY ---
 $list_data = []; 
 $page = (int)($_GET['page'] ?? 1); 
-$per_page = 25; // Pagination 25 data
+$per_page = 28; // Pagination 25 data
 $total_pages = 1; 
 
 if ($page < 1) $page = 1;
@@ -406,13 +429,13 @@ if (in_array($action, ['list', 'gallery', 'map', 'users'])) {
     <style>
         body{font-family:'Segoe UI', sans-serif;background:#f4f6f8;margin:0;display:flex;height:100vh;overflow:hidden;color:#333}
         .sidebar{width:250px;background:#fff;border-right:1px solid #e0e0e0;display:flex;flex-direction:column;flex-shrink:0}
-        .brand{padding:20px;border-bottom:1px solid #f0f0f0;font-weight:700;color:#2E7D32;display:flex;align-items:center;gap:10px;font-size:18px}
+        .brand{padding:20px;border-bottom:1px solid #ffffffff;font-weight:700;color:#2E7D32;display:flex;align-items:center;gap:10px;font-size:18px}
         .nav{list-style:none;padding:10px 0;margin:0;flex:1;overflow-y:auto}
         .nav a{display:flex;align-items:center;gap:10px;padding:12px 20px;color:#555;text-decoration:none;border-left:4px solid transparent;transition:all 0.2s}
         .nav a:hover,.nav a.active{background:#e8f5e9;color:#2E7D32;border-left-color:#2E7D32}
         .main{flex:1;padding:25px;overflow-y:auto;display:flex;flex-direction:column}
         .header{display:flex;justify-content:space-between;align-items:center;margin-bottom:25px}
-        .card{background:#fff;padding:20px;border-radius:10px;box-shadow:0 2px 5px rgba(0,0,0,0.05);margin-bottom:20px;border:1px solid #f0f0f0}
+        .card{background:#fff;padding:50px;border-radius:10px;box-shadow:0 2px 5px rgba(0,0,0,0.05);margin-bottom:20px;border:1px solid #f0f0f0}
         .btn{padding:8px 14px;border:none;border-radius:6px;color:#fff;cursor:pointer;text-decoration:none;font-size:14px;display:inline-flex;align-items:center;gap:5px;font-weight:600;transition:opacity 0.2s}
         .btn:hover{opacity:0.9}
         .btn-p{background:#2E7D32} .btn-d{background:#d32f2f} .btn-w{background:#f39c12} .btn-b{background:#2196f3} .btn-i{background:#1565c0}
@@ -522,9 +545,43 @@ if(isset($_SESSION['swal_warning'])){ echo "<script>Swal.fire({icon:'warning',ti
             <h4>Jumlah Data per Lokasi</h4>
             <div style="height:350px;">
                 <canvas id="c3"></canvas>
+            </div></div>
+
+<div class="card" style="width:100%; box-sizing:border-box; margin-top:20px;">
+            <h4><i class="fas fa-users" style="color:#2E7D32;"></i> Rekapitulasi Data Petugas</h4>
+            <div style="overflow-x:auto;">
+                <table style="margin-top:10px;">
+                    <thead>
+                        <tr>
+                            <th width="50">No</th>
+                            <th>Nama Petugas</th>
+                            <th style="text-align:right;">Total Semua Data</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <?php if(empty($stats['officer_stats'])): ?>
+                            <tr><td colspan="3" align="center" style="padding:20px;">Belum ada data masuk.</td></tr>
+                        <?php else: $no=1; foreach($stats['officer_stats'] as $off): ?>
+                            <tr>
+                                <td><?=$no++?></td>
+                                <td>
+                                    <div style="display:flex; align-items:center; gap:10px;">
+                                        <i class="fas fa-user-circle fa-2x" style="color:#2E7D32;"></i>
+                                        <b><?=$off['officers']?></b>
+                                    </div>
+                                </td>
+                                <td align="right">
+                                    <span style="font-size:18px; font-weight:bold; color:#333;">
+                                        <?=number_format($off['total'])?>
+                                    </span>
+                                    <span style="color:#888; font-size:13px;"> Titik Geotag</span>
+                                </td>
+                            </tr>
+                        <?php endforeach; endif; ?>
+                    </tbody>
+                </table>
             </div>
         </div>
-
         <script>
             new Chart(document.getElementById('c1'),{type:'doughnut',data:{labels:<?=json_encode(array_keys($stats['cond']))?>,datasets:[{data:<?=json_encode(array_values($stats['cond']))?>,backgroundColor:['#4caf50','#ffeb3b','#f44336','#ff9800']}]}});
             new Chart(document.getElementById('c2'),{type:'line',data:{labels:<?=json_encode(array_keys($stats['daily']))?>,datasets:[{label:'Geotag Masuk',data:<?=json_encode(array_values($stats['daily']))?>,borderColor:'#2E7D32',tension:0.3,fill:true,backgroundColor:'rgba(46,125,50,0.1)'}]}});
@@ -824,7 +881,8 @@ if(isset($_SESSION['swal_warning'])){ echo "<script>Swal.fire({icon:'warning',ti
                                     <button type="button" onclick="viewDetail(<?=$r_json?>)" class="btn btn-i" title="Detail" style="background:#00bcd4;"><i class="fas fa-eye"></i></button>
                                 <?php endif; ?>
                                 
-                                <a href="?action=edit&table=<?=$table?>&id=<?=$r[$pk]?>" class="btn btn-b" title="Edit"><i class="fas fa-edit"></i></a>
+                                <a href="<?=build_url(['action'=>'edit', 'table'=>$table, 'id'=>$r[$pk]])?>" class="btn btn-b" title="Edit"><i class="fas fa-edit"></i></a>
+                                
                                 <button type="button" onclick="confirmDel('<?=$r[$pk]?>')" class="btn btn-d" title="Hapus"><i class="fas fa-trash"></i></button>
                             </td>
                         </tr>
@@ -943,10 +1001,18 @@ if(isset($_SESSION['swal_warning'])){ echo "<script>Swal.fire({icon:'warning',ti
         $d = $is_edit ? $pdo->query("SELECT * FROM `$table` WHERE `$pk`='{$_GET['id']}'")->fetch() : []; 
     ?>
         <div class="header"><h2><?=$is_edit ? 'Edit Data' : 'Tambah Data Baru'?> (<?=ucfirst(str_replace('_',' ',$table))?>)</h2></div>
-        <div class="card" style="max-width:700px;margin:0 auto;">
+        <div class="card" style="max-width:800px;margin:0 auto;">
             <form method="post">
                 <input type="hidden" name="csrf_token" value="<?=$_SESSION['csrf_token']?>">
                 
+                <?php 
+                    $keep_params = ['search', 'page', 'projectId', 'condition', 'start_date', 'end_date'];
+                    foreach($keep_params as $key):
+                        if(isset($_GET[$key])): 
+                ?>
+                    <input type="hidden" name="ret_<?=$key?>" value="<?=htmlspecialchars($_GET[$key])?>">
+                <?php endif; endforeach; ?>
+
                 <?php if($table=='geotags'): ?>
                     <input type="hidden" name="id" value="<?=$d['id']?>">
                     <div style="display:grid;grid-template-columns:1fr 1fr;gap:15px;margin-bottom:15px;">
