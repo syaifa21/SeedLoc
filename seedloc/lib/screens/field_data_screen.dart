@@ -27,7 +27,7 @@ class _FieldDataScreenState extends State<FieldDataScreen> {
   bool _isLoadingMeta = true;
   String? _selectedLocation;
   String? _itemType;
-  String _condition = 'Baik';
+  String _condition = 'Hidup';
   final List<String> _conditions = ['Hidup', 'Merana', 'Mati'];
   String? _photoPath;
 
@@ -223,8 +223,7 @@ class _FieldDataScreenState extends State<FieldDataScreen> {
         'Lng: ${_finalPosition!.longitude.toStringAsFixed(6)}\n'
         'Akurasi: ${_finalPosition!.accuracy.toStringAsFixed(1)}m\n'
         'Waktu: ${now.day}/${now.month}/${now.year} ${now.hour}:${now.minute}\n'
-        'Item: ${_itemType ?? "-"}\n'
-        'Kondisi: $_condition';
+;
 
     String fileName = 'IMG_${now.millisecondsSinceEpoch}';
 

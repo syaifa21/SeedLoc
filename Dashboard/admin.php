@@ -84,31 +84,80 @@ function export_data($pdo, $ids, $type, $base_url, $upload_dir, $full_project_id
     $stmt = $pdo->prepare($sql);
     $stmt->execute($params);
 
+  if ($full_project_id) {
+        $sql = ($full_project_id === 'all') ? "SELECT * FROM geotags ORDER BY id DESC" : "SELECT * FROM geotags WHERE projectId = ? ORDER BY id DESC";
+        $params = ($full_project_id === 'all') ? [] : [$full_project_id];
+        $filename_prefix = ($full_project_id === 'all') ? "All_Data_" : "Project_{$full_project_id}_";
+    } else {
+        if(empty($ids)) return;
+        $ph = implode(',', array_fill(0, count($ids), '?'));
+        $sql = "SELECT * FROM geotags WHERE id IN ($ph) ORDER BY id DESC";
+        $params = $ids;
+        $filename_prefix = "Selected_";
+    }
+
+    $stmt = $pdo->prepare($sql);
+    $stmt->execute($params);
+
     if ($type === 'download_zip') {
         if (!class_exists('ZipArchive')) { $_SESSION['swal_error'] = "ZipArchive extension missing."; return; }
+        
+        // Matikan buffering output untuk menghemat memori
+        if (ob_get_level()) ob_end_clean();
+        
         $zip = new ZipArchive();
         $zipName = $filename_prefix . 'Photos_' . date('Ymd_His') . '.zip';
         $tempZip = tempnam(sys_get_temp_dir(), 'zip');
+        
         if ($zip->open($tempZip, ZipArchive::CREATE) !== TRUE) return;
 
         $count = 0;
         while($r = $stmt->fetch()) {
-            $p = $r['photoPath']; if (empty($p)) continue;
+            $p = $r['photoPath']; 
+            if (empty($p)) continue;
+            
             $cleanType = preg_replace('/[^A-Za-z0-9]/', '_', $r['itemType']);
-            $cleanLoc  = preg_replace('/[^A-Za-z0-9]/', '_', $r['locationName']); // Tamb
+            $cleanLoc  = preg_replace('/[^A-Za-z0-9]/', '_', $r['locationName']);
+            // Nama file di dalam ZIP
             $zipInternalName = $r['id'] .'_'. $cleanLoc. '_' . $cleanType . '.jpg';
-            if (strpos($p, 'http') === 0) {
-                $content = @file_get_contents($p); if ($content) { $zip->addFromString($zipInternalName, $content); $count++; }
-            } else {
-                $filePath = $upload_dir . basename($p); if (file_exists($filePath)) { $zip->addFile($filePath, $zipInternalName); $count++; }
+
+            // --- OPTIMASI DIMULAI ---
+            // Cek file lokal dulu (jauh lebih cepat & hemat RAM daripada download via URL)
+            $localFileName = basename($p);
+            $localFilePath = $upload_dir . $localFileName;
+
+            if (file_exists($localFilePath)) {
+                // Tambahkan file langsung dari disk server (Ringan)
+                $zip->addFile($localFilePath, $zipInternalName);
+                $count++;
+            } 
+            // Fallback: Jika tidak ada di folder lokal, baru coba download (Berat)
+            elseif (strpos($p, 'http') === 0) {
+                $content = @file_get_contents($p); 
+                if ($content) { 
+                    $zip->addFromString($zipInternalName, $content); 
+                    $count++; 
+                }
             }
+            // --- OPTIMASI SELESAI ---
         }
         $zip->close();
+        
         if ($count > 0) {
-            header('Content-Type: application/zip'); header('Content-disposition: attachment; filename='.$zipName);
-            header('Content-Length: ' . filesize($tempZip)); readfile($tempZip); unlink($tempZip); exit;
-        } else { $_SESSION['swal_warning'] = "Tidak ada foto valid."; unlink($tempZip); if(!$full_project_id) header("Location: ?action=list&table=geotags"); return; }
+            header('Content-Type: application/zip'); 
+            header('Content-disposition: attachment; filename='.$zipName);
+            header('Content-Length: ' . filesize($tempZip)); 
+            readfile($tempZip); 
+            unlink($tempZip); 
+            exit;
+        } else { 
+            $_SESSION['swal_warning'] = "Tidak ada foto valid atau file fisik tidak ditemukan."; 
+            unlink($tempZip); 
+            if(!$full_project_id) header("Location: ?action=list&table=geotags"); 
+            return; 
+        }
 
+    
     } elseif ($type === 'csv') {
         header('Content-Type: text/csv'); header('Content-Disposition: attachment; filename="'.$filename_prefix.'Data_'.date('YmdHis').'.csv"');
         $out = fopen('php://output', 'w');

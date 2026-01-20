@@ -1,0 +1,411 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>The Anniversary of Ali & Wulan</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,400;0,600;1,400&family=Montserrat:wght@300;400;600&display=swap" rel="stylesheet">
+    
+    <style>
+        :root {
+            --primary-color: #8D6E63; /* Coklat Klasik */
+            --accent-color: #EFEBE9;
+            --bg-color: #FAFAFA;
+            --text-color: #3E2723;
+            --glass-bg: rgba(255, 255, 255, 0.9);
+            --overlay-bg: #fff;
+        }
+
+        * {
+            box-sizing: border-box;
+            -webkit-tap-highlight-color: transparent;
+        }
+
+        body {
+            margin: 0;
+            padding: 0;
+            font-family: 'Montserrat', sans-serif;
+            background-color: var(--bg-color);
+            background-image: url('https://www.transparenttextures.com/patterns/cubes.png'); /* Pattern halus */
+            min-height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            overflow: hidden; /* Lock scroll saat di cover */
+            color: var(--text-color);
+        }
+
+        /* --- COVER (OVERLAY) --- */
+        #opening-overlay {
+            position: fixed;
+            top: 0; left: 0; width: 100%; height: 100%;
+            background: var(--overlay-bg);
+            z-index: 9999;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            text-align: center;
+            padding: 2rem;
+            transition: transform 1s cubic-bezier(0.77, 0, 0.175, 1);
+        }
+
+        #opening-overlay.hidden {
+            transform: translateY(-100%);
+        }
+
+        .cover-content h1 {
+            font-size: 3.5rem;
+            margin-bottom: 10px;
+            font-family: 'Cormorant Garamond', serif;
+        }
+
+        .cover-content p {
+            letter-spacing: 2px;
+            font-size: 0.9rem;
+            margin-bottom: 40px;
+            color: #888;
+        }
+
+        /* --- MAIN CONTENT --- */
+        .card-wrapper {
+            position: relative;
+            width: 100%;
+            max-width: 900px;
+            height: 100vh; /* Full screen di HP */
+            max-height: 800px;
+            background: var(--glass-bg);
+            box-shadow: 0 0 50px rgba(0,0,0,0.05);
+            overflow: hidden;
+            transition: opacity 1s ease;
+            opacity: 0; /* Hidden initial */
+        }
+        
+        .card-wrapper.visible {
+            opacity: 1;
+        }
+        
+        @media (min-width: 768px) {
+             .card-wrapper {
+                height: 85vh;
+                border-radius: 30px;
+                border: 1px solid white;
+             }
+        }
+
+        /* Sections */
+        .section {
+            position: absolute;
+            top: 0; left: 0; width: 100%; height: 100%;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            padding: 3rem 1.5rem;
+            transition: 0.8s cubic-bezier(0.68, -0.55, 0.265, 1.55);
+            overflow-y: auto;
+        }
+
+        /* Home Style */
+        #home-section {
+            z-index: 2;
+            justify-content: center;
+            background: radial-gradient(circle at center, #fff, var(--accent-color));
+        }
+
+        #home-section.slide-out { transform: translateY(-100%); opacity: 0; }
+
+        .date-display {
+            font-family: 'Cormorant Garamond', serif;
+            font-size: 1.5rem;
+            font-style: italic;
+            margin: 20px 0 40px 0;
+            border-top: 1px solid var(--text-color);
+            border-bottom: 1px solid var(--text-color);
+            padding: 10px 40px;
+        }
+
+        /* Timer */
+        .timer-container {
+            display: flex;
+            gap: 15px;
+            margin-bottom: 40px;
+        }
+        .time-box {
+            text-align: center;
+            min-width: 60px;
+        }
+        .time-val {
+            font-family: 'Cormorant Garamond', serif;
+            font-size: 2.5rem;
+            font-weight: 600;
+            line-height: 1;
+        }
+        .time-label {
+            font-size: 0.65rem;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            margin-top: 5px;
+            color: #888;
+        }
+
+        /* Gallery Style */
+        #gallery-section {
+            z-index: 1;
+            transform: translateY(100%);
+            opacity: 0;
+            background: #fff;
+            padding-top: 80px; /* Space for back button */
+        }
+
+        #gallery-section.slide-in {
+            transform: translateY(0); opacity: 1; z-index: 3;
+        }
+
+        .photo-grid {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 10px;
+            width: 100%;
+            padding-bottom: 100px;
+        }
+        
+        .photo-item {
+            position: relative;
+            border-radius: 8px;
+            overflow: hidden;
+            aspect-ratio: 1/1;
+        }
+        .photo-item img { width: 100%; height: 100%; object-fit: cover; }
+        
+        .full-width { grid-column: span 2; aspect-ratio: 16/9; }
+        .tall { grid-row: span 2; aspect-ratio: 1/2; }
+
+        /* Buttons */
+        .btn-main {
+            padding: 15px 40px;
+            background: var(--text-color);
+            color: white;
+            border: none;
+            border-radius: 50px;
+            font-size: 0.9rem;
+            letter-spacing: 2px;
+            text-transform: uppercase;
+            cursor: pointer;
+            box-shadow: 0 10px 20px rgba(62, 39, 35, 0.2);
+            transition: transform 0.2s;
+            display: inline-flex;
+            align-items: center;
+            gap: 10px;
+        }
+        .btn-main:active { transform: scale(0.95); }
+
+        .btn-back {
+            position: absolute;
+            top: 25px; left: 25px;
+            width: 40px; height: 40px;
+            border-radius: 50%;
+            border: 1px solid #ccc;
+            background: white;
+            display: flex; align-items: center; justify-content: center;
+            cursor: pointer; z-index: 10;
+        }
+
+        /* Music Floating Button */
+        .music-fab {
+            position: fixed;
+            bottom: 30px; right: 30px;
+            width: 50px; height: 50px;
+            background: white;
+            border-radius: 50%;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.1);
+            display: flex; align-items: center; justify-content: center;
+            cursor: pointer; z-index: 1000;
+            border: 1px solid #eee;
+        }
+        .music-fab.playing {
+            animation: spin 4s linear infinite;
+        }
+        @keyframes spin { 100% { transform: rotate(360deg); } }
+
+        /* Typography Override */
+        h1, h2 { font-family: 'Cormorant Garamond', serif; color: var(--primary-color); }
+        h1 { font-size: 4rem; margin: 0; line-height: 1; }
+        
+        @media (max-width: 600px) {
+            h1 { font-size: 3.2rem; }
+            .timer-container { gap: 10px; }
+            .time-val { font-size: 2rem; }
+        }
+    </style>
+</head>
+<body>
+
+    <audio id="bg-audio" loop>
+        <source src="https://cdn.pixabay.com/download/audio/2022/10/25/audio_13a30737d9.mp3?filename=piano-moment-111666.mp3" type="audio/mpeg">
+    </audio>
+
+    <div id="opening-overlay">
+        <div class="cover-content">
+            <p>THE ANNIVERSARY OF</p>
+            <h1>Ali & Wulan</h1>
+            <p style="margin-top: 10px;">Selasa, 7 Januari 2025</p>
+            
+            <button class="btn-main" onclick="bukaUndangan()">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 18v-6a9 9 0 0 1 18 0v6"></path><path d="M21 19a2 2 0 0 1-2 2h-1a2 2 0 0 1-2-2v-3a2 2 0 0 1 2-2h3zM3 19a2 2 0 0 0 2 2h1a2 2 0 0 0 2-2v-3a2 2 0 0 0-2-2H3z"></path></svg>
+                Buka Undangan
+            </button>
+        </div>
+    </div>
+
+    <div class="music-fab" id="music-btn" onclick="toggleMusic()" style="display: none;">
+        <span id="music-icon" style="font-size: 20px;">🎵</span>
+    </div>
+
+    <div class="card-wrapper" id="main-content">
+        
+        <section id="home-section" class="section">
+            <p style="letter-spacing: 3px; font-size: 0.8rem; margin-bottom: 20px; text-transform: uppercase;">We Are Getting Married</p>
+            <h1>Ali & Wulan</h1>
+            <div class="date-display">07 . 01 . 2025</div>
+
+            <div class="timer-container">
+                <div class="time-box"><div class="time-val" id="d">0</div><div class="time-label">Hari</div></div>
+                <div class="time-box"><div class="time-val">:</div></div>
+                <div class="time-box"><div class="time-val" id="h">0</div><div class="time-label">Jam</div></div>
+                <div class="time-box"><div class="time-val">:</div></div>
+                <div class="time-box"><div class="time-val" id="m">0</div><div class="time-label">Menit</div></div>
+                <div class="time-box"><div class="time-val">:</div></div>
+                <div class="time-box"><div class="time-val" id="s">0</div><div class="time-label">Detik</div></div>
+            </div>
+
+            <p id="status-txt" style="font-style: italic; color: #888; margin-bottom: 30px;">Loading...</p>
+
+            <button class="btn-main" onclick="toggleGallery(true)">
+                Lihat Galeri Foto 📸
+            </button>
+        </section>
+
+        <section id="gallery-section" class="section">
+            <div class="btn-back" onclick="toggleGallery(false)">
+                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#333" stroke-width="2"><line x1="19" y1="12" x2="5" y2="12"></line><polyline points="12 19 5 12 12 5"></polyline></svg>
+            </div>
+
+            <h2 style="font-size: 2.5rem; margin-bottom: 10px;">Our Moments</h2>
+            <p style="margin-bottom: 30px; color: #666;">Kepingan kisah kasih kami.</p>
+
+            <div class="photo-grid">
+                <div class="photo-item full-width">
+                    <img src="https://seedloc.my.id/fotoku/foto1.jpg" alt="Wedding">
+                </div>
+                <div class="photo-item tall">
+                    <img src="https://images.unsplash.com/photo-1511285560982-1356c11d4606?w=400&q=80" alt="Couple">
+                </div>
+                <div class="photo-item">
+                    <img src="https://images.unsplash.com/photo-1606800052052-a08af7148866?w=400&q=80" alt="Ring">
+                </div>
+                <div class="photo-item">
+                    <img src="https://images.unsplash.com/photo-1529636721637-2a63706c6270?w=400&q=80" alt="Hands">
+                </div>
+                <div class="photo-item full-width">
+                    <img src="https://images.unsplash.com/photo-1465495976277-4387d4b0b4c6?w=800&q=80" alt="Love">
+                </div>
+                <div class="photo-item">
+                    <img src="https://images.unsplash.com/photo-1583939003579-730e3918a45a?w=400&q=80" alt="Details">
+                </div>
+                <div class="photo-item">
+                    <img src="https://images.unsplash.com/photo-1515934751635-c81c6bc9a2d8?w=400&q=80" alt="Smile">
+                </div>
+            </div>
+        </section>
+
+    </div>
+
+    <script>
+        // --- 1. SETUP AUDIO & AUTOPLAY LOGIC ---
+        const audio = document.getElementById('bg-audio');
+        const musicBtn = document.getElementById('music-btn');
+        const musicIcon = document.getElementById('music-icon');
+        let isPlaying = false;
+
+        function bukaUndangan() {
+            // 1. Hilangkan Cover
+            document.getElementById('opening-overlay').classList.add('hidden');
+            
+            // 2. Tampilkan Konten Utama
+            document.getElementById('main-content').classList.add('visible');
+            
+            // 3. Tampilkan Tombol Musik
+            musicBtn.style.display = 'flex';
+
+            // 4. PUTAR MUSIK OTOMATIS
+            audio.play().then(() => {
+                isPlaying = true;
+                musicBtn.classList.add('playing');
+                musicIcon.innerText = "🎵";
+            }).catch(error => {
+                console.log("Autoplay dicegah browser, perlu interaksi manual.");
+                isPlaying = false;
+                musicBtn.classList.remove('playing');
+                musicIcon.innerText = "🔇";
+            });
+            
+            // Allow scroll body
+            document.body.style.overflow = 'auto';
+        }
+
+        function toggleMusic() {
+            if (isPlaying) {
+                audio.pause();
+                musicBtn.classList.remove('playing');
+                musicIcon.innerText = "🔇";
+            } else {
+                audio.play();
+                musicBtn.classList.add('playing');
+                musicIcon.innerText = "🎵";
+            }
+            isPlaying = !isPlaying;
+        }
+
+        // --- 2. LOGIC TIMER ---
+        const targetDate = new Date("Jan 7, 2025 00:00:00").getTime();
+
+        setInterval(() => {
+            const now = new Date().getTime();
+            let distance = targetDate - now;
+            let note = "Menuju Hari Bahagia";
+
+            if (distance < 0) {
+                distance = now - targetDate; 
+                note = "Sudah Bersama Selama";
+            }
+
+            const d = Math.floor(distance / (1000 * 60 * 60 * 24));
+            const h = Math.floor((distance % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60));
+            const m = Math.floor((distance % (1000 * 60 * 60)) / (1000 * 60));
+            const s = Math.floor((distance % (1000 * 60)) / 1000);
+
+            document.getElementById('d').innerText = d;
+            document.getElementById('h').innerText = h < 10 ? '0'+h : h;
+            document.getElementById('m').innerText = m < 10 ? '0'+m : m;
+            document.getElementById('s').innerText = s < 10 ? '0'+s : s;
+            document.getElementById('status-txt').innerText = note;
+        }, 1000);
+
+        // --- 3. LOGIC TRANSISI ---
+        function toggleGallery(show) {
+            const home = document.getElementById('home-section');
+            const gallery = document.getElementById('gallery-section');
+
+            if (show) {
+                home.classList.add('slide-out');
+                gallery.classList.add('slide-in');
+            } else {
+                home.classList.remove('slide-out');
+                gallery.classList.remove('slide-in');
+            }
+        }
+    </script>
+</body>
+</html>

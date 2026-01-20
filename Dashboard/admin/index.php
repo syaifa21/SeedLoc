@@ -6,6 +6,15 @@ require_once 'functions.php';
 require_once 'actions.php';
 require_once 'fetch_data.php';
 
+// --- PERSIAPAN FILTER PERSISTEN (Agar filter tidak hilang setelah aksi) ---
+// Variable ini akan mencetak input hidden di dalam form Action
+$filter_keys = ['search', 'page', 'projectId', 'condition', 'start_date', 'end_date', 'locationName', 'itemType', 'has_photo', 'is_duplicate'];
+$hidden_filters = '';
+foreach($filter_keys as $key) {
+    if(isset($_GET[$key]) && $_GET[$key] !== '') {
+        $hidden_filters .= '<input type="hidden" name="ret_'.htmlspecialchars($key).'" value="'.htmlspecialchars($_GET[$key]).'">';
+    }
+}
 ?>
 <!DOCTYPE html>
 <html lang="id">
@@ -147,7 +156,7 @@ if(isset($_SESSION['swal_warning'])){ echo "<script>Swal.fire({icon:'warning',ti
 <?php elseif($action === 'monitor'): ?>
         <div class="header"><h2>Monitoring Target Penanaman</h2></div>
         
-        <div class="card" style="min-height: 500px;">
+        <div class="card" style="height: 2000px;">
             <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:20px; border-bottom:1px solid #eee; padding-bottom:15px;">
                 <label style="font-weight:bold; color:#666;">Pilih Lokasi:</label>
                 <select id="locationSelect" onchange="switchTable(this.value)" style="padding:10px; border:1px solid #2E7D32; border-radius:5px; font-weight:bold; color:#2E7D32; min-width:200px; cursor:pointer; outline:none;">
@@ -210,7 +219,21 @@ if(isset($_SESSION['swal_warning'])){ echo "<script>Swal.fire({icon:'warning',ti
         <div class="header"><h2>Peta Sebaran Real-time</h2></div>
         <form class="filter-bar">
             <input type="hidden" name="action" value="map">
-            <input type="text" name="search" placeholder="Cari ID, Petugas, Lokasi, Detail..." value="<?=htmlspecialchars($_GET['search']??'')?>" style="max-width:200px;">
+            <input type="text" name="search" placeholder="Cari ID, Petugas, Detail..." value="<?=htmlspecialchars($_GET['search']??'')?>" style="max-width:200px;">
+            
+            <select name="locationName" style="max-width:150px;">
+                <option value="all">Semua Lokasi</option>
+                <?php foreach($locations_list as $loc): ?>
+                    <option value="<?=htmlspecialchars($loc)?>" <?=($_GET['locationName']??'')==$loc?'selected':''?>><?=htmlspecialchars($loc)?></option>
+                <?php endforeach; ?>
+            </select>
+            <select name="itemType" style="max-width:150px;">
+                <option value="all">Semua Jenis</option>
+                <?php foreach($tree_types as $type): ?>
+                    <option value="<?=htmlspecialchars($type)?>" <?=($_GET['itemType']??'')==$type?'selected':''?>><?=htmlspecialchars($type)?></option>
+                <?php endforeach; ?>
+            </select>
+
             <select name="condition">
                 <option value="all" <?=($_GET['condition']??'')=='all'?'selected':''?>>Semua Kondisi</option>
                 <option value="Hidup" <?=($_GET['condition']??'')=='Hidup'?'selected':''?>>Hidup</option>
@@ -223,24 +246,45 @@ if(isset($_SESSION['swal_warning'])){ echo "<script>Swal.fire({icon:'warning',ti
             <button class="btn btn-p">Filter</button> <a href="?action=map" class="btn btn-d">Reset</a>
         </form>
         <div class="card" style="padding:0;overflow:hidden;"><div id="map" style="height:650px;"></div></div>
-        <script>
+<script>
+            // 1. Inisialisasi Peta
             var m = L.map('map').setView([-6.2, 106.8], 5);
+            
+            // 2. Layer Dasar
             var streets = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { attribution: '&copy; OpenStreetMap' });
             var satellite = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', { attribution: '&copy; Esri' });
+            
+            // Cek layer terakhir yang dipilih user
             var savedLayer = localStorage.getItem('SelectedLayer');
             if (savedLayer === 'Satelit') { m.addLayer(satellite); } else { m.addLayer(streets); }
             var baseMaps = { "Peta Jalan": streets, "Satelit": satellite };
             
+            // 3. Setup KML Layer (Overlay) - Tidak dirubah, tetap aman
             <?php if(file_exists($kml_file_path)): ?>
                 var kmlUrl = '<?=$kml_url_path?>?t=<?=time()?>';
-                var customLayer = omnivore.kml(kmlUrl).on('ready', function() { this.addTo(m); this.eachLayer(function(layer) { if (layer.feature && layer.feature.properties) { var desc = layer.feature.properties.description || layer.feature.properties.name || "Area Project"; layer.bindPopup(desc); } }); });
+                var customLayer = omnivore.kml(kmlUrl).on('ready', function() { 
+                    this.addTo(m); 
+                    this.eachLayer(function(layer) { 
+                        if (layer.feature && layer.feature.properties) { 
+                            var desc = layer.feature.properties.description || layer.feature.properties.name || "Area Project"; 
+                            layer.bindPopup(desc); 
+                        } 
+                    }); 
+                });
                 var overlayMaps = { "Layer Overlay": customLayer };
                 L.control.layers(baseMaps, overlayMaps).addTo(m);
+                
+                // Tombol Zoom ke Layer
                 var zoomControl = L.Control.extend({
                     options: { position: 'topright' },
                     onAdd: function (map) {
-                        var container = L.DomUtil.create('div', 'custom-map-btn leaflet-bar leaflet-control'); container.innerHTML = '<i class="fas fa-expand-arrows-alt"></i>'; container.title = "Fokus ke Layer";
-                        container.onclick = function(){ if(customLayer && customLayer.getBounds().isValid()){ map.fitBounds(customLayer.getBounds()); } else { Swal.fire('Info', 'Layer tidak ditemukan atau kosong.', 'info'); } };
+                        var container = L.DomUtil.create('div', 'custom-map-btn leaflet-bar leaflet-control'); 
+                        container.innerHTML = '<i class="fas fa-expand-arrows-alt"></i>'; 
+                        container.title = "Fokus ke Layer";
+                        container.onclick = function(){ 
+                            if(customLayer && customLayer.getBounds().isValid()){ map.fitBounds(customLayer.getBounds()); } 
+                            else { Swal.fire('Info', 'Layer tidak ditemukan atau kosong.', 'info'); } 
+                        };
                         return container;
                     }
                 });
@@ -249,23 +293,67 @@ if(isset($_SESSION['swal_warning'])){ echo "<script>Swal.fire({icon:'warning',ti
                 L.control.layers(baseMaps).addTo(m);
             <?php endif; ?>
 
+            // Simpan preferensi layer user
             m.on('baselayerchange', function(e) { localStorage.setItem('SelectedLayer', e.name); });
+
+            // 4. LOGIC MARKER & POPUP (BAGIAN UTAMA YANG DIRECODE)
             var markers = L.markerClusterGroup();
             var pts = <?=json_encode($map_data)?>; 
             var bounds = [];
-            pts.forEach(p=>{
-                var lat=parseFloat(p.latitude),lng=parseFloat(p.longitude);
+            
+            // Variabel global sementara untuk menyimpan data lengkap agar bisa diakses tombol "Lihat Detail"
+            var mapDataById = {}; 
+
+            pts.forEach(p => {
+                var lat = parseFloat(p.latitude);
+                var lng = parseFloat(p.longitude);
+                
                 if(!isNaN(lat)){
+                    // Simpan data lengkap ke object berdasarkan ID
+                    mapDataById[p.id] = p;
+
+                    // Tentukan Warna
                     var color = (p.condition == 'Hidup' || p.condition == 'Baik') ? 'green' : ((p.condition == 'Merana' || p.condition == 'Rusak') ? 'orange' : 'red');
-                    var icon = L.divIcon({className: 'custom-div-icon', html: `<div style="background-color:${color}; width:12px; height:12px; border-radius:50%; border:2px solid white; box-shadow:0 0 3px black;"></div>`, iconSize: [12, 12], iconAnchor: [6, 6]});
-                    var img=p.photoPath?(p.photoPath.startsWith('http')?p.photoPath:'<?=$photo_base_url?>'+p.photoPath):'';
-                    var mkr = L.marker([lat,lng],{icon:icon});
-                    mkr.bindPopup(`<b>${p.itemType}</b><br><span style='color:${color}'>${p.condition}</span><br>${p.locationName}${img?'<br><img src="'+img+'" width="100%" style="margin-top:5px;border-radius:4px;">':''}`);
+                    
+                    // Buat Icon
+                    var icon = L.divIcon({
+                        className: 'custom-div-icon', 
+                        html: `<div style="background-color:${color}; width:12px; height:12px; border-radius:50%; border:2px solid white; box-shadow:0 0 3px black;"></div>`, 
+                        iconSize: [12, 12], 
+                        iconAnchor: [6, 6]
+                    });
+
+                    // Siapkan Gambar Thumbnail untuk Popup
+                    var img = p.photoPath ? (p.photoPath.startsWith('http') ? p.photoPath : '<?=$photo_base_url?>' + p.photoPath) : '';
+                    
+                    // --- RECODE ISI POPUP ---
+                    // Menambahkan Nama Petugas & Tombol Detail
+                    var popupContent = `
+                        <div style="min-width:200px;">
+                            <b style="font-size:14px;">${p.itemType}</b><br>
+                            <span style='color:${color}; font-weight:bold; font-size:12px;'>${p.condition}</span>
+                            <div style="margin-top:5px; border-top:1px solid #eee; padding-top:5px; font-size:12px; color:#555;">
+                                <div><i class="fas fa-user-circle" style="color:#2E7D32;"></i> <b>${p.officers || '-'}</b></div>
+                                <div><i class="fas fa-map-marker-alt" style="color:#d32f2f;"></i> ${p.locationName}</div>
+                            </div>
+                            
+                            ${img ? `<img src="${img}" style="width:100%; height:120px; object-fit:cover; margin-top:8px; border-radius:4px;">` : ''}
+                            
+                            <button onclick="viewDetail(mapDataById[${p.id}])" class="btn btn-p" style="width:100%; margin-top:10px; padding:6px; font-size:12px; display:flex; justify-content:center; align-items:center; gap:5px;">
+                                <i class="fas fa-info-circle"></i> Lihat Detail Lengkap
+                            </button>
+                        </div>
+                    `;
+
+                    var mkr = L.marker([lat,lng], {icon: icon});
+                    mkr.bindPopup(popupContent);
                     markers.addLayer(mkr);
                     bounds.push([lat,lng]);
                 }
             });
+
             m.addLayer(markers);
+            
             <?php if(!file_exists($kml_file_path)): ?>
                 if(bounds.length) m.fitBounds(bounds, {padding:[50,50]});
             <?php endif; ?>
@@ -303,50 +391,118 @@ if(isset($_SESSION['swal_warning'])){ echo "<script>Swal.fire({icon:'warning',ti
             <input type="hidden" name="action" value="list"><input type="hidden" name="table" value="<?=$table?>">
             <?php if($table=='geotags'): ?>
                 <input type="text" name="search" placeholder="Cari ID, Jenis, Lokasi, Petugas, Detail..." value="<?=htmlspecialchars($_GET['search']??'')?>" style="flex:1;">
+                
+                <select name="locationName" style="max-width:150px;">
+                    <option value="all">Semua Lokasi</option>
+                    <?php foreach($locations_list as $loc): ?>
+                        <option value="<?=htmlspecialchars($loc)?>" <?=($_GET['locationName']??'')==$loc?'selected':''?>><?=htmlspecialchars($loc)?></option>
+                    <?php endforeach; ?>
+                </select>
+                <select name="itemType" style="max-width:150px;">
+                    <option value="all">Semua Jenis</option>
+                    <?php foreach($tree_types as $type): ?>
+                        <option value="<?=htmlspecialchars($type)?>" <?=($_GET['itemType']??'')==$type?'selected':''?>><?=htmlspecialchars($type)?></option>
+                    <?php endforeach; ?>
+                </select>
+
                 <select name="projectId"><option value="all">Semua Lokasi Project</option><?php foreach($projects_list as $p) echo "<option value='{$p['projectId']}' ". (($_GET['projectId']??'') == $p['projectId'] ? 'selected' : '') .">{$p['locationName']}</option>"; ?></select>
+                
+                <select name="has_photo" style="max-width:150px;">
+                    <option value="all" <?=($_GET['has_photo']??'')=='all'?'selected':''?>>Semua Foto</option>
+                    <option value="yes" <?=($_GET['has_photo']??'')=='yes'?'selected':''?>>Ada Foto</option>
+                    <option value="no" <?=($_GET['has_photo']??'')=='no'?'selected':''?>>Tanpa Foto</option>
+                </select>
+                
+                <select name="is_duplicate" style="max-width:150px;">
+                    <option value="all">Semua Data</option>
+                    <option value="exact" <?=($_GET['is_duplicate']??'')=='exact'?'selected':''?>>Koordinat Persis</option>
+                    <option value="near" <?=($_GET['is_duplicate']??'')=='near'?'selected':''?>>Koordinat Dekat (1m)</option>
+                    <option value="photo" <?=($_GET['is_duplicate']??'')=='photo'?'selected':''?>>File Foto Sama</option>
+                </select>
+
                 <div style="display:flex;align-items:center;gap:5px;"><input type="date" name="start_date" value="<?=htmlspecialchars($_GET['start_date']??'')?>"> - <input type="date" name="end_date" value="<?=htmlspecialchars($_GET['end_date']??'')?>"></div>
             <?php else: ?><input type="text" name="search" placeholder="Cari Project, Lokasi, Petugas..." value="<?=htmlspecialchars($_GET['search']??'')?>" style="flex:1;"><?php endif; ?>
             
             <button class="btn btn-b"><i class="fas fa-search"></i> Cari</button> <a href="?action=list&table=<?=$table?>" class="btn btn-d"><i class="fas fa-sync"></i></a>
 
-            <?php if($table=='geotags'): $currProj = $_GET['projectId'] ?? 'all'; $labelExport = ($currProj == 'all' || empty($currProj)) ? "SEMUA DATA" : "PROJECT #$currProj"; ?>
+            <?php if($table=='geotags'): ?>
                 <div style="display:flex; gap:5px; align-items:center; background:#e8f5e9; padding:5px 10px; border-radius:6px; margin-left:auto;">
-                    <span style="font-size:11px; font-weight:bold; color:#2E7D32; text-transform:uppercase;">Export (<?=$labelExport?>):</span>
-                    <a href="javascript:void(0)" onclick="downloadExport('csv', '<?=$currProj?>')" class="btn btn-i" style="padding:4px 8px; font-size:11px;" title="CSV"><i class="fas fa-file-csv"></i> CSV</a>
-                    <a href="javascript:void(0)" onclick="downloadExport('download_zip', '<?=$currProj?>')" class="btn btn-w" style="padding:4px 8px; font-size:11px;" title="Foto ZIP"><i class="fas fa-file-archive"></i> ZIP</a>
-                    <a href="javascript:void(0)" onclick="downloadExport('kml', '<?=$currProj?>')" class="btn btn-b" style="padding:4px 8px; font-size:11px;" title="KML"><i class="fas fa-map"></i> KML</a>
+                    <span style="font-size:11px; font-weight:bold; color:#2E7D32; text-transform:uppercase;">Export (Filtered):</span>
+                    <a href="javascript:void(0)" onclick="downloadExport('csv')" class="btn btn-i" style="padding:4px 8px; font-size:11px;" title="CSV"><i class="fas fa-file-csv"></i> CSV</a>
+                    <a href="javascript:void(0)" onclick="downloadExport('download_zip')" class="btn btn-w" style="padding:4px 8px; font-size:11px;" title="Foto ZIP"><i class="fas fa-file-archive"></i> ZIP</a>
+                    <a href="javascript:void(0)" onclick="downloadExport('kml')" class="btn btn-b" style="padding:4px 8px; font-size:11px;" title="KML"><i class="fas fa-map"></i> KML</a>
                 </div>
             <?php endif; ?>
         </form>
 
         <form method="post" id="bulkForm">
+            <?=$hidden_filters?>
+
             <?php if($table == 'geotags'): ?>
-            <div style="background:#e8f5e9;padding:12px;border-radius:8px;margin-bottom:15px;display:flex;gap:10px;align-items:center;border:1px solid #c8e6c9;">
+            <div style="background:#e8f5e9;padding:12px;border-radius:8px;margin-bottom:15px;display:flex;gap:10px;align-items:center;border:1px solid #c8e6c9;flex-wrap:wrap;">
                 <i class="fas fa-check-square" style="color:#2E7D32;"></i> <b>Aksi Terpilih:</b> 
-                <select name="bulk_action_type" required style="border-color:#2E7D32;">
-                    <option value="">-- Pilih Aksi --</option><option value="download_zip">Download Foto (ZIP)</option><option value="export_csv">Export Data (Excel/CSV)</option><option value="export_kml">Export Peta (KML)</option><option value="delete_selected">Hapus Data</option>
+                
+                <select name="bulk_action_type" required style="border-color:#2E7D32;" onchange="toggleBulkInputs(this.value)">
+                    <option value="">-- Pilih Aksi --</option>
+                    <option value="mass_edit_type">Ubah Jenis Pohon (Massal)</option>
+                    <option value="download_zip">Download Foto (ZIP)</option>
+                    <option value="export_csv">Export Data (Excel/CSV)</option>
+                    <option value="export_kml">Export Peta (KML)</option>
+                    <option value="delete_selected">Hapus Data</option>
                 </select>
-                <button type="button" onclick="confirmBulk()" class="btn btn-w">Proses</button> <button name="bulk_action" id="realBulkBtn" style="display:none;"></button><input type="hidden" name="csrf_token" value="<?=$_SESSION['csrf_token']?>">
+
+                <select name="new_tree_type" id="newTreeTypeInput" style="display:none; border-color:#1976d2; font-weight:bold;">
+                    <option value="">-- Pilih Jenis Baru --</option>
+                    <?php foreach($tree_types as $t): ?>
+                        <option value="<?=htmlspecialchars($t)?>"><?=htmlspecialchars($t)?></option>
+                    <?php endforeach; ?>
+                </select>
+
+                <button type="button" onclick="confirmBulk()" class="btn btn-w">Proses</button> 
+                <button name="bulk_action" id="realBulkBtn" style="display:none;"></button>
+                <input type="hidden" name="csrf_token" value="<?=$_SESSION['csrf_token']?>">
             </div>
+
+            <script>
+            function toggleBulkInputs(val) {
+                var t = document.getElementById('newTreeTypeInput');
+                if(val === 'mass_edit_type') { t.style.display = 'inline-block'; t.required = true; } 
+                else { t.style.display = 'none'; t.required = false; }
+            }
+            </script>
             <?php endif; ?>
 
             <div class="card" style="padding:0;overflow:hidden;"><div style="overflow-x:auto;"><table>
                     <thead>
                         <tr>
-                            <?php if($table=='geotags'): ?><th width="30"><input type="checkbox" onclick="toggle(this)"></th><th>Foto</th><th>ID</th><th>Jenis</th><th>Petugas</th><th>Lokasi</th><th>Tanggal</th><th>Kondisi</th>
+                            <?php if($table=='geotags'): ?>
+                                <th width="30"><input type="checkbox" onclick="toggle(this)"></th>
+                                <th width="40">No</th>
+                                <th>Foto</th><th>ID</th><th>Jenis</th><th>Petugas</th><th>Lokasi</th>
+                                <th>Koordinat (Lat, Lng)</th> <th>Tanggal</th><th>Kondisi</th>
                             <?php else: ?><th>ID</th><th>Nama Kegiatan</th><th>Lokasi Project</th><th>Petugas</th><th>Status</th><?php endif; ?>
                             <th style="text-align:right;">Aksi</th>
                         </tr>
                     </thead>
                     <tbody>
-                        <?php if(empty($list_data)): ?><tr><td colspan="10" align="center" style="padding:30px;color:#999;">Tidak ada data ditemukan.</td></tr>
-                        <?php else: foreach($list_data as $r): ?>
+                        <?php if(empty($list_data)): ?><tr><td colspan="11" align="center" style="padding:30px;color:#999;">Tidak ada data ditemukan.</td></tr>
+                        <?php else: 
+                            $no_urut = ($page - 1) * $per_page + 1;
+                            foreach($list_data as $r): ?>
                         <tr>
                             <?php if($table=='geotags'): ?>
                                 <td><input type="checkbox" name="selected_ids[]" value="<?=$r[$pk]?>"></td>
+                                <td><?=$no_urut++?></td>
                                 <?php $i=get_photo_url($r['photoPath'], $photo_base_url); ?>
-                                <td><?php if($i):?><img src="<?=$i?>" width="45" height="45" style="object-fit:cover;border-radius:4px;cursor:pointer;border:1px solid #ddd;" onclick="viewDetail(<?=htmlspecialchars(json_encode($r), ENT_QUOTES, 'UTF-8')?>)"><?php else: ?>-<?php endif; ?></td>
-                                <td>#<?=$r['id']?></td><td><b><?=$r['itemType']?></b></td><td><small style="color:#1565c0;font-weight:600;"><i class="fas fa-user-tag"></i> <?=$r['officers'] ?? '-'?></small></td><td><?=$r['locationName']?></td><td><?=substr($r['timestamp'],0,10)?></td>
+                                <td><?php if($i):?><img src="<?=$i?>" width="150" height="200" style="object-fit:cover;border-radius:4px;cursor:pointer;border:1px solid #ddd;" onclick="viewDetail(<?=htmlspecialchars(json_encode($r), ENT_QUOTES, 'UTF-8')?>)"><?php else: ?>-<?php endif; ?></td>
+                                <td>#<?=$r['id']?></td><td><b><?=$r['itemType']?></b></td><td><small style="color:#1565c0;font-weight:600;"><i class="fas fa-user-tag"></i> <?=$r['officers'] ?? '-'?></small></td><td><?=$r['locationName']?></td>
+                                
+                                <td>
+                                    <small style="font-family:monospace; display:block; color:#666;">Lat: <?=substr($r['latitude'],0,8)?></small>
+                                    <small style="font-family:monospace; display:block; color:#666;">Lng: <?=substr($r['longitude'],0,9)?></small>
+                                </td>
+
+                                <td><?=substr($r['timestamp'],0,10)?></td>
                                 <td><span class="status-badge" style="<?=($r['condition']=='Hidup' || $r['condition']=='Baik') ? 'color:#2E7D32;background:#e8f5e9;' : (($r['condition']=='Merana') ? 'color:#856404;background:#fff3cd;' : 'color:#c62828;background:#ffebee;') ?>"><?=$r['condition']?></span></td>
                             <?php else: ?>
                                 <td><b>#<?=$r['projectId']?></b></td><td><?=$r['activityName']?></td><td><i class="fas fa-map-marker-alt" style="color:#d32f2f;margin-right:5px;"></i> <?=$r['locationName']?></td><td><small style="color:#666;"><?=$r['officers']?></small></td><td><span class="status-badge status-<?=$r['status']?>"><?=$r['status']?></span></td>
@@ -361,7 +517,13 @@ if(isset($_SESSION['swal_warning'])){ echo "<script>Swal.fire({icon:'warning',ti
                     </tbody>
             </table></div></div>
         </form>
-        <form method="post" id="delForm"><input type="hidden" name="delete" value="1"><input type="hidden" name="delete_id" id="delId"><input type="hidden" name="csrf_token" value="<?=$_SESSION['csrf_token']?>"></form>
+        
+        <form method="post" id="delForm">
+            <input type="hidden" name="delete" value="1">
+            <input type="hidden" name="delete_id" id="delId">
+            <input type="hidden" name="csrf_token" value="<?=$_SESSION['csrf_token']?>">
+            <?=$hidden_filters?>
+        </form>
 
         <?php elseif($action=='users'): $table='admin_users'; ?>
             <div class="card" style="padding:0;overflow:hidden;"><table>
@@ -406,7 +568,7 @@ if(isset($_SESSION['swal_warning'])){ echo "<script>Swal.fire({icon:'warning',ti
         <div class="card" style="max-width:800px;margin:0 auto;">
             <form method="post">
                 <input type="hidden" name="csrf_token" value="<?=$_SESSION['csrf_token']?>">
-                <?php foreach(['search', 'page', 'projectId', 'condition', 'start_date', 'end_date'] as $key): if(isset($_GET[$key])): ?><input type="hidden" name="ret_<?=$key?>" value="<?=htmlspecialchars($_GET[$key])?>"><?php endif; endforeach; ?>
+                <?php foreach(['search', 'page', 'projectId', 'condition', 'start_date', 'end_date', 'locationName', 'itemType', 'has_photo', 'is_duplicate'] as $key): if(isset($_GET[$key])): ?><input type="hidden" name="ret_<?=$key?>" value="<?=htmlspecialchars($_GET[$key])?>"><?php endif; endforeach; ?>
 
                 <?php if($table=='geotags'): ?>
                     <input type="hidden" name="id" value="<?=$d['id']?>">
@@ -448,10 +610,24 @@ if(isset($_SESSION['swal_warning'])){ echo "<script>Swal.fire({icon:'warning',ti
 <div id="imgModal" class="modal" onclick="this.style.display='none'"><img class="modal-content" id="modalImg"><div id="modalCaption" style="color:#fff;margin-top:15px;font-size:16px;background:rgba(0,0,0,0.5);padding:5px 15px;border-radius:20px;"></div></div>
 
 <script>
-async function downloadExport(type, projectId) {
-    let popup = Swal.fire({title: 'Export Data',html: `<div style="text-align:left; margin-bottom:5px; font-weight:bold;" id="progress-label">Menyiapkan data di server...</div><progress id="export-progress" value="0" max="100" style="width: 100%; height: 20px;"></progress><div id="progress-text" style="font-size:12px; color:#666; margin-top:5px;">Mohon tunggu...</div>`, allowOutsideClick: false, showConfirmButton: false, didOpen: () => { Swal.showLoading(); }});
+async function downloadExport(type) {
+    const params = new URLSearchParams({
+        action: 'export_full',
+        type: type,
+        search: document.querySelector('input[name="search"]')?.value || '',
+        locationName: document.querySelector('select[name="locationName"]')?.value || 'all',
+        itemType: document.querySelector('select[name="itemType"]')?.value || 'all',
+        projectId: document.querySelector('select[name="projectId"]')?.value || 'all',
+        condition: document.querySelector('select[name="condition"]')?.value || 'all',
+        has_photo: document.querySelector('select[name="has_photo"]')?.value || 'all',
+        is_duplicate: document.querySelector('select[name="is_duplicate"]')?.value || 'all',
+        start_date: document.querySelector('input[name="start_date"]')?.value || '',
+        end_date: document.querySelector('input[name="end_date"]')?.value || ''
+    });
+
+    let popup = Swal.fire({title: 'Export Data',html: `<div style="text-align:left; margin-bottom:5px; font-weight:bold;" id="progress-label">Menyiapkan data (Sesuai Filter)...</div><progress id="export-progress" value="0" max="100" style="width: 100%; height: 20px;"></progress><div id="progress-text" style="font-size:12px; color:#666; margin-top:5px;">Mohon tunggu...</div>`, allowOutsideClick: false, showConfirmButton: false, didOpen: () => { Swal.showLoading(); }});
     try {
-        const response = await fetch(`?action=export_full&projectId=${projectId}&type=${type}`);
+        const response = await fetch(`?${params.toString()}`);
         if (!response.ok) throw new Error('Gagal menghubungi server.');
         const reader = response.body.getReader();
         const contentLength = +response.headers.get('Content-Length');

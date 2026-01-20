@@ -375,7 +375,7 @@ function build_url($params = []) {
                 <?php endif; ?>
             </div>
         </form>
-
+                    
         <div class="view-section <?php echo $view==='map'?'active':''; ?>">
             <div class="card" style="padding:0; overflow:hidden;">
                 <div id="map"></div>
