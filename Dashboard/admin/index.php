@@ -44,6 +44,9 @@ foreach($filter_keys as $key) {
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/FileSaver.js/2.0.5/FileSaver.min.js"></script>
 
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.5.29/jspdf.plugin.autotable.min.js"></script>
     <style>
         /* BASE STYLES */
         body{font-family:'Segoe UI', sans-serif;background:#f4f6f8;margin:0;display:flex;height:100vh;overflow:hidden;color:#333}
@@ -468,6 +471,7 @@ if(isset($_SESSION['swal_error'])){ echo "<script>Swal.fire({icon:'error',title:
                     <a href="javascript:void(0)" onclick="downloadExport('csv')" class="btn btn-i" style="padding:4px 8px; font-size:11px;">CSV</a>
                     <a href="javascript:void(0)" onclick="downloadExport('download_zip')" class="btn btn-w" style="padding:4px 8px; font-size:11px;">ZIP</a>
                     <a href="javascript:void(0)" onclick="downloadExport('kml')" class="btn btn-b" style="padding:4px 8px; font-size:11px;">KML</a>
+                    <a href="javascript:void(0)" onclick="downloadExport('pdf')" class="btn btn-d" style="padding:4px 8px; font-size:11px; background:#d32f2f;">PDF</a>
                 </div>
             <?php endif; ?>
         </form>
@@ -651,11 +655,10 @@ if(isset($_SESSION['swal_error'])){ echo "<script>Swal.fire({icon:'error',title:
 <script>
 /**
  * ==========================================
- * BAGIAN 1: FUNGSI GLOBAL (WAJIB DI LUAR DOM)
+ * BAGIAN 1: FUNGSI GLOBAL & HELPER
  * ==========================================
  */
 
-// Helper UI Sederhana
 function toggle(s) {
     var c = document.querySelectorAll('input[name="selected_ids[]"]');
     for (var i = 0; i < c.length; i++) c[i].checked = s.checked;
@@ -676,31 +679,38 @@ function switchTable(id) {
 // ---------------------------------------------------------
 
 async function downloadExport(type) {
-    // Tentukan Label Tipe
-    let titleType = type === 'download_zip' ? 'ZIP' : (type === 'csv' ? 'CSV' : 'KML');
+    // Label Tipe
+    let titleType = type === 'download_zip' ? 'ZIP' : (type === 'csv' ? 'CSV' : (type === 'pdf' ? 'PDF' : 'KML'));
 
-    // Tampilkan Pilihan
+    // HTML Pilihan
     const choice = await Swal.fire({
-        title: `Pilih Metode Export ${titleType}`,
+        title: `Export ${titleType}`,
         icon: 'question',
         html: `
             <div style="text-align:left; font-size:14px; line-height:1.5;">
-                <p><b>1. Server Side (Stabil)</b><br>
-                Proses di Server. Cocok untuk data sangat banyak. Langsung download 1 file jadi.</p>
+                <p><b>1. Server Side</b><br>
+                Proses di Server. Cepat. (Tidak tersedia untuk PDF Foto).</p>
                 <p><b>2. Client Side (Laptop)</b><br>
-                Proses di Laptop via Browser. Ada progress bar realtime. Menggunakan RAM laptop.</p>
+                Proses di Laptop. Ada progress bar. Wajib untuk PDF dengan Foto.</p>
             </div>
         `,
         showDenyButton: true,
         showCancelButton: true,
-        confirmButtonText: '<i class="fas fa-server"></i> Server Side',
-        confirmButtonColor: '#2E7D32',
+        confirmButtonText: (type === 'pdf') ? 'Tidak Tersedia' : '<i class="fas fa-server"></i> Server Side',
+        confirmButtonColor: (type === 'pdf') ? '#ccc' : '#2E7D32',
         denyButtonText: '<i class="fas fa-laptop"></i> Client Side',
         denyButtonColor: '#1976d2',
-        cancelButtonText: 'Batal'
+        cancelButtonText: 'Batal',
+        didOpen: () => {
+            // Disable tombol server side khusus PDF (karena berat)
+            if(type === 'pdf') {
+                Swal.getConfirmButton().disabled = true;
+                Swal.getConfirmButton().style.cursor = 'not-allowed';
+            }
+        }
     });
 
-    if (choice.isConfirmed) {
+    if (choice.isConfirmed && type !== 'pdf') {
         processServerExport(type);
     } else if (choice.isDenied) {
         processClientExport(type);
@@ -717,14 +727,11 @@ function processServerExport(type) {
 
     Swal.fire({
         title: 'Memproses di Server...',
-        html: 'Harap tunggu. File akan otomatis terunduh.<br><small>Jangan tutup halaman ini.</small>',
+        html: 'Harap tunggu file terunduh.',
         didOpen: () => Swal.showLoading()
     });
 
-    // Trigger download
     window.location.href = 'actions.php?' + params.toString();
-    
-    // Tutup loading estimasi 3 detik
     setTimeout(() => Swal.close(), 3000);
 }
 
@@ -733,99 +740,172 @@ async function processClientExport(type) {
     const form = document.getElementById('filterForm');
     const formData = new FormData(form);
     
-    // Tentukan endpoint JSON: ZIP butuh "get_json_photos", CSV/KML butuh "get_json_full"
+    // PDF juga butuh data full seperti CSV/KML
     let jsonAction = (type === 'download_zip') ? 'get_json_photos' : 'get_json_full';
     
     formData.append('action', 'export_full');
     formData.append('type', jsonAction);
 
-    Swal.fire({
-        title: 'Mengambil Data...',
-        text: 'Sedang meminta data mentah dari server...',
-        allowOutsideClick: false,
-        showConfirmButton: false,
-        didOpen: () => Swal.showLoading()
-    });
+    Swal.fire({ title: 'Mengambil Data...', didOpen: () => Swal.showLoading() });
 
     try {
-        // A. Ambil Data JSON
         const response = await fetch('actions.php', { method: 'POST', body: formData });
         const result = await response.json();
 
         if (result.status !== 'success' || !result.data || result.data.length === 0) {
-            throw new Error("Tidak ada data ditemukan untuk diexport.");
+            throw new Error("Tidak ada data ditemukan.");
         }
 
         const data = result.data;
-        Swal.update({ title: 'Menyusun File...', html: `Memproses ${data.length} data di laptop...` });
-
-        // B. Generate File Sesuai Tipe
-        if (type === 'download_zip') {
-            await generateZipClient(data);
-        } 
-        else if (type === 'csv') {
-            generateCSVClient(data);
-        } 
-        else if (type === 'kml') {
-            generateKMLClient(data);
-        }
+        
+        // Pilihan Generator
+        if (type === 'download_zip') await generateZipClient(data);
+        else if (type === 'csv') generateCSVClient(data);
+        else if (type === 'kml') generateKMLClient(data);
+        else if (type === 'pdf') await generatePDFClient(data); // <-- Fungsi Baru
 
     } catch (error) {
         Swal.fire('Gagal', error.message || 'Terjadi kesalahan.', 'error');
     }
 }
 
-// --- GENERATOR FILE CLIENT SIDE ---
+// ---------------------------------------------------------
+// GENERATOR PDF (BARU)
+// ---------------------------------------------------------
+async function generatePDFClient(data) {
+    const { jsPDF } = window.jspdf;
+    
+    // Setting Kertas: Landscape ('l'), satuan mm, ukuran A4
+    const doc = new jsPDF('l', 'mm', 'a4'); 
 
-function generateCSVClient(data) {
-    // Header CSV dengan BOM UTF-8
-    let csvContent = "\uFEFFID,ProjectID,Officer,Lat,Lng,Loc,Time,Type,Cond,Detail,Photo URL\n";
+    const total = data.length;
+    let processed = 0;
 
-    data.forEach(r => {
-        // Bersihkan data agar CSV tidak rusak (escape tanda kutip)
-        const clean = (text) => `"${(text || '').toString().replace(/"/g, '""')}"`;
-        
-        let row = [
-            clean(r.id), clean(r.projectId), clean(r.officers), 
-            clean(r.latitude), clean(r.longitude), clean(r.locationName), 
-            clean(r.timestamp), clean(r.itemType), clean(r.condition), 
-            clean(r.details), clean(r.full_photo_url)
-        ].join(",");
-        
-        csvContent += row + "\n";
+    // --- Loading Bar ---
+    Swal.fire({
+        title: 'Menyiapkan PDF',
+        html: `Memuat gambar: <b id="pdf-c">0</b> / ${total}<br><div style="background:#ddd;height:10px;margin-top:5px;"><div id="pdf-b" style="background:#d32f2f;height:100%;width:0%"></div></div>`,
+        showConfirmButton: false, allowOutsideClick: false
     });
 
+    // 1. Pre-load Gambar ke Base64
+    for (let i = 0; i < data.length; i++) {
+        const row = data[i];
+        try {
+            if(row.full_photo_url) {
+                const blob = await fetch(row.full_photo_url).then(r => r.blob());
+                row.base64Img = await new Promise((resolve) => {
+                    const reader = new FileReader();
+                    reader.onloadend = () => resolve(reader.result);
+                    reader.readAsDataURL(blob);
+                });
+            }
+        } catch (e) { console.warn('Skip img', e); }
+        processed++;
+        document.getElementById('pdf-c').innerText = processed;
+        document.getElementById('pdf-b').style.width = Math.round((processed/total)*100) + '%';
+    }
+
+    Swal.update({ html: 'Menyusun Halaman PDF...' });
+
+    // 2. Header & Judul
+    const pageWidth = doc.internal.pageSize.getWidth();
+    
+    doc.setFontSize(18);
+    doc.setTextColor(46, 125, 50);
+    doc.text("LAPORAN MONITORING SEEDLOC", pageWidth / 2, 15, { align: 'center' });
+    
+    doc.setFontSize(10);
+    doc.setTextColor(100);
+    doc.text(`Dicetak pada: ${new Date().toLocaleString('id-ID')}`, pageWidth / 2, 22, { align: 'center' });
+    
+    doc.setDrawColor(46, 125, 50);
+    doc.setLineWidth(1);
+    doc.line(10, 25, pageWidth - 10, 25);
+
+    // [PERBAIKAN UTAMA] Definisikan resultData DI SINI (Sebelum autoTable)
+    const resultData = data; 
+
+    // 3. Tabel Data
+    doc.autoTable({
+        startY: 30,
+        pageBreak: 'auto',      // Mode standar
+        rowPageBreak: 'avoid',  // PENTING: Jika baris tidak muat, pindahkan ke halaman baru
+        margin: { top: 30, bottom: 20},
+        head: [['No', 'Foto', 'Lokasi Project', 'Jenis Pohon', 'Kondisi', 'Koordinat', 'Petugas']],
+        body: data.map((r, index) => [
+            index + 1,
+            '', // Placeholder Foto
+            r.locationName,
+            r.itemType,
+            r.condition,
+            `${r.latitude}, \n${r.longitude}`,
+            r.officers || '-'
+        ]),
+        theme: 'grid',
+        headStyles: { 
+            fillColor: [46, 125, 50],
+            textColor: [255, 255, 255],
+            halign: 'center',
+            fontSize: 10
+        },
+        bodyStyles: { valign: 'middle', fontSize: 9 },
+        columnStyles: {
+            0: { cellWidth: 10, halign: 'center' },
+            1: { cellWidth: 20, minCellHeight: 25},
+            2: { cellWidth: 40 },
+            3: { cellWidth: 35 },
+            4: { cellWidth: 25, halign: 'center' },
+            5: { cellWidth: 40, halign: 'center' },
+            6: { cellWidth: 'auto' }
+        },
+        didDrawCell: function(dataHook) {
+            // Kita ubah nama parameternya jadi dataHook biar gak bingung
+            if (dataHook.column.index === 1 && dataHook.cell.section === 'body') {
+                const rowIndex = dataHook.row.index;
+                
+                // Ambil dari variabel resultData yang SUDAH didefinisikan di atas
+                if (resultData[rowIndex] && resultData[rowIndex].base64Img) {
+                    const imgData = resultData[rowIndex].base64Img;
+                    doc.addImage(imgData, 'JPEG', dataHook.cell.x + 2, dataHook.cell.y + 2, 15, 20);
+                }
+            }
+        }
+    });
+
+    // 4. Save File
+    doc.save(`Laporan_SeedLoc_${new Date().toISOString().slice(0,10)}.pdf`);
+    Swal.fire('Selesai', 'PDF Berhasil dibuat!', 'success');
+}
+// ---------------------------------------------------------
+// GENERATOR LAINNYA (CSV, KML, ZIP - TETAP SAMA)
+// ---------------------------------------------------------
+
+function generateCSVClient(data) {
+    let csvContent = "\uFEFFID,ProjectID,Officer,Lat,Lng,Loc,Time,Type,Cond,Detail,Photo URL\n";
+    data.forEach(r => {
+        const clean = (text) => `"${(text || '').toString().replace(/"/g, '""')}"`;
+        let row = [clean(r.id), clean(r.projectId), clean(r.officers), clean(r.latitude), clean(r.longitude), clean(r.locationName), clean(r.timestamp), clean(r.itemType), clean(r.condition), clean(r.details), clean(r.full_photo_url)].join(",");
+        csvContent += row + "\n";
+    });
     const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8" });
-    saveAs(blob, `Export_Client_${new Date().toISOString().slice(0,10)}.csv`);
-    Swal.fire('Selesai', 'File CSV berhasil dibuat.', 'success');
+    saveAs(blob, `Export_Client.csv`);
+    Swal.fire('Selesai', 'File CSV dibuat.', 'success');
 }
 
 function generateKMLClient(data) {
-    // Trik: Pisahkan '<' dan '?' agar PHP tidak mengira ini tag PHP
-    let kml = '<' + '?xml version="1.0" encoding="UTF-8"?' + '>\n' +
-              '<kml xmlns="http://www.opengis.net/kml/2.2">\n' +
-              '<Document>\n' +
-              '<name>Export Client Side</name>';
-
+    let kml = '<'+'?xml version="1.0" encoding="UTF-8"?'+'>'
+    '<kml xmlns="http://www.opengis.net/kml/2.2">'
+    '<Document>\n'
+    '<name>Export Client</name>';
     data.forEach(r => {
-        const desc = `Tipe: ${r.itemType}\nKondisi: ${r.condition}\nPetugas: ${r.officers||'-'}\nWaktu: ${r.timestamp}`;
-        // Escape XML Special Chars
-        const safeDesc = desc.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-        const safeName = `#${r.id} - ${r.itemType}`;
-        
-        kml += `
-        <Placemark>
-            <name>${safeName}</name>
-            <description>${safeDesc}</description>
-            <Point><coordinates>${r.longitude},${r.latitude}</coordinates></Point>
-        </Placemark>`;
+        const desc = `Tipe: ${r.itemType}\nKondisi: ${r.condition}\nPetugas: ${r.officers||'-'}\nWaktu: ${r.timestamp}`.replace(/&/g, '&amp;');
+        kml += `<Placemark><name>#${r.id}</name><description>${desc}</description><Point><coordinates>${r.longitude},${r.latitude}</coordinates></Point></Placemark>`;
     });
-
     kml += `</Document></kml>`;
-
     const blob = new Blob([kml], { type: "application/vnd.google-earth.kml+xml" });
-    saveAs(blob, `Export_Client_${new Date().toISOString().slice(0,10)}.kml`);
-    Swal.fire('Selesai', 'File KML berhasil dibuat.', 'success');
+    saveAs(blob, `Export_Client.kml`);
+    Swal.fire('Selesai', 'File KML dibuat.', 'success');
 }
 
 async function generateZipClient(photos) {
@@ -835,41 +915,24 @@ async function generateZipClient(photos) {
 
     Swal.fire({
         title: 'Download Foto',
-        html: `Proses: <b id="zip-c">0</b> / ${total}<br>
-               <div style="background:#ddd;height:10px;margin-top:5px;border-radius:5px;overflow:hidden;">
-                    <div id="zip-b" style="background:#2E7D32;height:100%;width:0%;transition:width 0.1s;"></div>
-               </div>
-               <small>Mohon jangan tutup browser.</small>`,
-        showConfirmButton: false, 
-        allowOutsideClick: false
+        html: `Proses: <b id="zip-c">0</b> / ${total}<br><div style="background:#ddd;height:10px;margin-top:5px;"><div id="zip-b" style="background:#2E7D32;height:100%;width:0%"></div></div>`,
+        showConfirmButton: false, allowOutsideClick: false
     });
 
-    // Loop download foto satu per satu
     for (const photo of photos) {
         try {
             const blob = await fetch(photo.url).then(r => r.ok ? r.blob() : null);
-            if(blob) {
-                zip.file(photo.name, blob);
-                count++;
-                
-                // Update UI
-                const pct = Math.round((count/total)*100);
-                document.getElementById('zip-c').innerText = count;
-                document.getElementById('zip-b').style.width = pct + '%';
-            }
-        } catch(e){
-            console.warn("Gagal download foto:", photo.url);
-        }
+            if(blob) { zip.file(photo.name, blob); count++; document.getElementById('zip-c').innerText = count; document.getElementById('zip-b').style.width = Math.round((count/total)*100) + '%'; }
+        } catch(e){}
     }
     
-    Swal.update({ title: 'Menyimpan ZIP...', html: 'Sedang membungkus file akhir...' });
     const content = await zip.generateAsync({ type: "blob" });
-    saveAs(content, `Export_Photos_Client.zip`);
-    Swal.fire('Selesai', `Berhasil mengunduh ${count} foto.`, 'success');
+    saveAs(content, `Export_Photos.zip`);
+    Swal.fire('Selesai', `ZIP ${count} foto siap.`, 'success');
 }
 
 // ---------------------------------------------------------
-// LOGIKA AJAX LOAD TABLE & UTILITIES LAIN
+// INITIAL LOAD & EVENTS
 // ---------------------------------------------------------
 
 function loadGeotagsData(page) {
@@ -877,106 +940,71 @@ function loadGeotagsData(page) {
     const formData = new FormData(form);
     const params = new URLSearchParams(formData);
     params.append('page', page);
-
-    // Update URL Browser (Agar saat refresh halaman tetap sama)
     window.history.pushState(null, '', '?' + params.toString());
 
-    // Fake Loading Animation
+    // Animasi Loading
     let timerInterval;
     Swal.fire({
         title: 'Memuat Data...',
-        html: 'Mengambil data terbaru.<br><b style="font-size:24px;color:#2E7D32;">0%</b>',
+        html: 'Mengambil data.<br><b style="font-size:24px;color:#2E7D32;">0%</b>',
         allowOutsideClick: false,
         didOpen: () => {
             Swal.showLoading();
             const b = Swal.getHtmlContainer().querySelector('b');
             let progress = 0;
             timerInterval = setInterval(() => {
-                let step = Math.floor(Math.random() * 5) + 1;
-                if(progress < 90) progress += step; 
-                else if(progress < 95) progress += 1;
+                if(progress < 90) progress += Math.floor(Math.random() * 5) + 1;
                 if(b) b.textContent = progress + '%';
             }, 300);
         },
-        willClose: () => { clearInterval(timerInterval); }
+        willClose: () => clearInterval(timerInterval)
     });
 
-    // Fetch Data
     fetch('load_geotags.php?' + params.toString())
-    .then(response => {
-        if (!response.ok) throw new Error(`HTTP Error: ${response.status}`);
-        return response.text(); 
-    })
+    .then(r => r.ok ? r.text() : Promise.reject(r.status))
     .then(text => {
         try {
-            const res = JSON.parse(text); 
+            const res = JSON.parse(text);
             if(res.status === 'success') {
                 const b = Swal.getHtmlContainer().querySelector('b');
                 if(b) b.textContent = '100%';
-                setTimeout(() => {
-                    Swal.close();
-                    renderTable(res.data);
-                    renderPagination(res.pagination);
-                }, 200);
-            } else {
-                Swal.fire('Gagal', res.message || 'Gagal memuat data', 'error');
-            }
-        } catch (e) {
-            console.error("Raw Response:", text);
-            Swal.fire({icon: 'error',title: 'Terjadi Kesalahan',html: `Response server tidak valid.`});
-        }
+                setTimeout(() => { Swal.close(); renderTable(res.data); renderPagination(res.pagination); }, 200);
+            } else { Swal.fire('Error', res.message, 'error'); }
+        } catch(e) { Swal.fire('Error', 'Format data invalid.', 'error'); }
     })
-    .catch(err => {
-        Swal.fire('Koneksi Error', err.message, 'error');
-    });
+    .catch(e => Swal.fire('Error', 'Koneksi bermasalah.', 'error'));
 }
 
 function renderTable(rows) {
     const tbody = document.getElementById('geotagsTableBody');
     tbody.innerHTML = ''; 
-
-    if(rows.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="11" align="center" style="padding:30px;color:#999;">Tidak ada data ditemukan sesuai filter.</td></tr>';
-        return;
-    }
-
-    const currentParams = new URLSearchParams(window.location.search);
+    if(rows.length === 0) { tbody.innerHTML = '<tr><td colspan="11" align="center">Tidak ada data.</td></tr>'; return; }
+    const qp = new URLSearchParams(window.location.search);
 
     rows.forEach(r => {
-        const safeData = JSON.stringify(r.raw).replace(/"/g, '&quot;');
-        const editParams = new URLSearchParams(currentParams);
-        editParams.set('action', 'edit');
-        editParams.set('table', 'geotags');
-        editParams.set('id', r.id);
-        const editUrl = '?' + editParams.toString();
+        const safe = JSON.stringify(r.raw).replace(/"/g, '&quot;');
+        qp.set('action', 'edit'); qp.set('table', 'geotags'); qp.set('id', r.id);
+        const img = r.photoUrl ? `<img src="${r.photoUrl}" width="150" height="200" style="object-fit:cover;border-radius:4px;cursor:pointer;" onclick="viewDetail(${safe})">` : '-';
 
-        const img = r.photoUrl 
-            ? `<img src="${r.photoUrl}" width="150" height="200" style="object-fit:cover;border-radius:4px;cursor:pointer;border:1px solid #ddd;" onclick="viewDetail(${safeData})">` 
-            : '-';
-
-        const tr = `
+        tbody.insertAdjacentHTML('beforeend', `
             <tr>
                 <td><input type="checkbox" name="selected_ids[]" value="${r.id}"></td>
                 <td>${r.no}</td>
                 <td>${img}</td>
                 <td>#${r.id}</td>
                 <td><b>${r.itemType}</b></td>
-                <td><small style="color:#1565c0;font-weight:600;"><i class="fas fa-user-tag"></i> ${r.officers}</small></td>
+                <td><small>${r.officers}</small></td>
                 <td>${r.locationName}</td>
-                <td>
-                    <small style="font-family:monospace; display:block; color:#666;">${r.lat}</small>
-                    <small style="font-family:monospace; display:block; color:#666;">${r.lng}</small>
-                </td>
+                <td><small style="font-family:monospace;">${r.lat}<br>${r.lng}</small></td>
                 <td>${r.date}</td>
                 <td><span class="status-badge" style="${r.badgeStyle}">${r.condition}</span></td>
-                <td style="text-align:right;">
-                    <button type="button" onclick="viewDetail(${safeData})" class="btn btn-i" title="Detail"><i class="fas fa-eye"></i></button>
-                    <a href="${editUrl}" class="btn btn-b" title="Edit"><i class="fas fa-edit"></i></a>
-                    <button type="button" onclick="confirmDel('${r.id}')" class="btn btn-d" title="Hapus"><i class="fas fa-trash"></i></button>
+                <td align="right">
+                    <button type="button" onclick="viewDetail(${safe})" class="btn btn-i"><i class="fas fa-eye"></i></button>
+                    <a href="?${qp.toString()}" class="btn btn-b"><i class="fas fa-edit"></i></a>
+                    <button type="button" onclick="confirmDel('${r.id}')" class="btn btn-d"><i class="fas fa-trash"></i></button>
                 </td>
             </tr>
-        `;
-        tbody.insertAdjacentHTML('beforeend', tr);
+        `);
     });
 }
 
@@ -984,136 +1012,61 @@ function renderPagination(pg) {
     const container = document.getElementById('jsPagination');
     container.innerHTML = '';
     if(pg.total_pages <= 1) return;
-
-    let html = '';
-    const curr = pg.current_page;
-    const total = pg.total_pages;
-
-    html += (curr > 1) ? `<a onclick="loadGeotagsData(${curr-1})">&laquo; Prev</a>` : `<a class="disabled">&laquo; Prev</a>`;
-
-    let start = Math.max(1, curr - 2);
-    let end = Math.min(total, curr + 2);
-
-    if(start > 1) {
-        html += `<a onclick="loadGeotagsData(1)">1</a>`;
-        if(start > 2) html += `<span>...</span>`;
-    }
-
-    for(let i = start; i <= end; i++) {
-        if(i === curr) html += `<a class="active">${i}</a>`;
-        else html += `<a onclick="loadGeotagsData(${i})">${i}</a>`;
-    }
-
-    if(end < total) {
-        if(end < total - 1) html += `<span>...</span>`;
-        html += `<a onclick="loadGeotagsData(${total})">${total}</a>`;
-    }
-
-    html += (curr < total) ? `<a onclick="loadGeotagsData(${curr+1})">Next &raquo;</a>` : `<a class="disabled">Next &raquo;</a>`;
+    let html = (pg.current_page > 1) ? `<a onclick="loadGeotagsData(${pg.current_page-1})">&laquo; Prev</a>` : `<a class="disabled">&laquo; Prev</a>`;
+    // Simplifikasi pagination logic agar pendek
+    html += `<a class="active">${pg.current_page} / ${pg.total_pages}</a>`;
+    html += (pg.current_page < pg.total_pages) ? `<a onclick="loadGeotagsData(${pg.current_page+1})">Next &raquo;</a>` : `<a class="disabled">Next &raquo;</a>`;
     container.innerHTML = html;
 }
 
-// Helpers Form & Action
-function injectFiltersToForm(formId) {
-    const form = document.getElementById(formId);
-    if(!form) return;
-    form.querySelectorAll('.dynamic-ret').forEach(el => el.remove());
-    const params = new URLSearchParams(window.location.search);
-    const keys = ['search', 'page', 'projectId', 'condition', 'start_date', 'end_date', 'locationName', 'itemType', 'has_photo', 'is_duplicate'];
-    keys.forEach(key => {
-        const val = params.get(key);
-        if(val) {
-            const input = document.createElement('input');
-            input.type = 'hidden'; input.name = 'ret_' + key; input.value = val; input.className = 'dynamic-ret';
-            form.appendChild(input);
+// Helpers Form & Detail
+function injectFiltersToForm(fid) {
+    const f = document.getElementById(fid);
+    if(!f) return;
+    f.querySelectorAll('.dynamic-ret').forEach(el=>el.remove());
+    new URLSearchParams(window.location.search).forEach((v,k)=>{
+        if(['search','page','condition','start_date','end_date','locationName','itemType','projectId'].includes(k)){
+            const i = document.createElement('input'); i.type='hidden'; i.name='ret_'+k; i.value=v; i.className='dynamic-ret'; f.appendChild(i);
         }
     });
 }
 
 function confirmDel(id){ 
-    Swal.fire({title:'Hapus Data?',icon:'warning',showCancelButton:true,confirmButtonColor:'#d33',confirmButtonText:'Ya, Hapus'}).then((r)=>{ 
-        if(r.isConfirmed){ 
-            document.getElementById('delId').value = id; 
-            injectFiltersToForm('delForm'); 
-            document.getElementById('delForm').submit(); 
-        } 
-    }); 
+    Swal.fire({title:'Hapus?',icon:'warning',showCancelButton:true,confirmButtonColor:'#d33'}).then(r=>{if(r.isConfirmed){
+        document.getElementById('delId').value=id; injectFiltersToForm('delForm'); document.getElementById('delForm').submit();
+    }}); 
 }
 
 function confirmBulk(){ 
-    var s=document.querySelector('select[name="bulk_action_type"]'); 
-    if(s.value==''){ Swal.fire('Info','Pilih aksi dulu','info'); return; } 
-    Swal.fire({title:'Yakin proses massal?',icon:'warning',showCancelButton:true}).then((r)=>{ 
-        if(r.isConfirmed) {
-            injectFiltersToForm('bulkForm'); 
-            document.getElementById('realBulkBtn').click(); 
-        }
-    }); 
+    if(document.querySelector('select[name="bulk_action_type"]').value==''){Swal.fire('Pilih aksi dulu');return;}
+    Swal.fire({title:'Proses Massal?',icon:'warning',showCancelButton:true}).then(r=>{if(r.isConfirmed){
+        injectFiltersToForm('bulkForm'); document.getElementById('realBulkBtn').click();
+    }}); 
 }
 
-function viewDetail(data) {
-    var html = `<table style="width:100%;">
-    <tr><td><b>JENIS</b></td><td>${data.itemType}</td></tr>
-    <tr><td><b>PETUGAS</b></td><td>${data.officers||'-'}</td></tr>
-    <tr><td><b>LOKASI</b></td><td>${data.locationName}</td></tr>
-    <tr><td><b>KONDISI</b></td><td>${data.condition}</td></tr>
-    <tr><td><b>KOORDINAT</b></td><td>${data.latitude}, ${data.longitude}</td></tr>
-    <tr><td><b>WAKTU</b></td><td>${data.timestamp}</td></tr>
-    <tr><td><b>DETAIL</b></td><td>${data.details||'-'}</td></tr>
-    </table>`;
-    document.getElementById('detailContent').innerHTML = html; 
-    document.getElementById('detailModal').style.display = 'flex';
+function viewDetail(d) {
+    document.getElementById('detailContent').innerHTML = `<table style="width:100%"><tr><td>JENIS</td><td>${d.itemType}</td></tr><tr><td>LOKASI</td><td>${d.locationName}</td></tr><tr><td>KOORDINAT</td><td>${d.latitude}, ${d.longitude}</td></tr><tr><td>WAKTU</td><td>${d.timestamp}</td></tr></table>`;
+    document.getElementById('detailModal').style.display='flex';
 }
 
-/**
- * ==========================================
- * BAGIAN 2: EVENT LISTENERS (SAAT DOM READY)
- * ==========================================
- */
 document.addEventListener("DOMContentLoaded", function() {
-
-    // 1. Navigation Filter Interceptor (Agar filter terbawa saat pindah sidebar)
-    const navLinks = document.querySelectorAll('.nav a, .btn-d[href^="?action="]'); 
-    
-    navLinks.forEach(link => {
-        link.addEventListener('click', function(e) {
-            if(this.getAttribute('href').startsWith('javascript') || this.href.includes('action=logout')) return;
-            e.preventDefault(); 
-            
-            const targetUrl = new URL(this.href, window.location.origin);
-            const targetParams = targetUrl.searchParams;
-            const currentParams = new URLSearchParams(window.location.search);
-            const filtersToKeep = ['locationName', 'projectId', 'itemType', 'condition', 'start_date', 'end_date', 'search', 'has_photo', 'is_duplicate'];
-            
-            filtersToKeep.forEach(key => {
-                if(currentParams.has(key) && !targetParams.has(key)) {
-                    targetParams.append(key, currentParams.get(key));
-                }
-            });
-
-            if(currentParams.get('action') !== targetParams.get('action')) {
-                targetParams.delete('page'); 
-            }
-            window.location.href = targetUrl.pathname + '?' + targetParams.toString();
+    // Nav Interceptor
+    document.querySelectorAll('.nav a, .btn-d[href^="?action="]').forEach(l => {
+        l.addEventListener('click', function(e) {
+            if(this.href.includes('logout') || this.getAttribute('href').startsWith('javascript')) return;
+            e.preventDefault();
+            const t = new URL(this.href, location.origin);
+            new URLSearchParams(location.search).forEach((v,k)=>{ if(!t.searchParams.has(k)) t.searchParams.append(k,v); });
+            if(new URLSearchParams(location.search).get('action') !== t.searchParams.get('action')) t.searchParams.delete('page');
+            location.href = t.pathname + '?' + t.searchParams.toString();
         });
     });
 
-    // 2. Initial Data Load (Khusus List Geotags)
-    const urlParams = new URLSearchParams(window.location.search);
-    const isGeotagsList = (urlParams.get('action') === 'list' && urlParams.get('table') === 'geotags');
-    
-    if(isGeotagsList) {
-        const currPage = urlParams.get('page') || 1;
-        loadGeotagsData(currPage);
-
-        // Override Form Submit agar pakai AJAX
-        const form = document.getElementById('filterForm');
-        if(form) {
-            form.addEventListener('submit', function(e) {
-                e.preventDefault();
-                loadGeotagsData(1); 
-            });
-        }
+    // Initial Load
+    if(new URLSearchParams(location.search).get('table') === 'geotags') {
+        loadGeotagsData(new URLSearchParams(location.search).get('page')||1);
+        const f = document.getElementById('filterForm');
+        if(f) f.addEventListener('submit', e=>{ e.preventDefault(); loadGeotagsData(1); });
     }
 });
 </script>

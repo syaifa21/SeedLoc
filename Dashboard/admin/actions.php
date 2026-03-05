@@ -82,33 +82,43 @@ if ($action === 'export_full' || (isset($_POST['action']) && $_POST['action'] ==
 // ... (kode 'get_json_photos' yang lama biarkan di atas sini) ...
 
     // --- TAMBAHAN BARU: API UNTUK CLIENT-SIDE CSV/KML (Data Lengkap) ---
+    // --- CASE 2: CLIENT SIDE - GET JSON FULL (Untuk PDF/CSV/KML Client) ---
     if ($type === 'get_json_full') {
+        // [FIX UTAMA] Bersihkan semua output sampah (spasi/error) sebelum kirim JSON
+        while (ob_get_level()) ob_end_clean();
+        
         header('Content-Type: application/json');
 
-        // Logic Filter sama seperti sebelumnya
-        list($where, $params) = buildWhere('geotags', $pdo);
-        
-        // Cek Selected IDs vs Filter
-        if (isset($_POST['selected_ids']) && !empty($_POST['selected_ids'])) {
-             $ids = $_POST['selected_ids'];
-             $ph = implode(',', array_fill(0, count($ids), '?'));
-             $sql = "SELECT geotags.*, projects.officers FROM geotags LEFT JOIN projects ON geotags.projectId = projects.projectId WHERE geotags.id IN ($ph) ORDER BY geotags.id DESC";
-             $stmt = $pdo->prepare($sql);
-             $stmt->execute($ids);
-        } else {
-             $sql = "SELECT geotags.*, projects.officers FROM geotags LEFT JOIN projects ON geotags.projectId = projects.projectId " . ($where ? "WHERE " . implode(' AND ', $where) : "") . " ORDER BY geotags.id DESC";
-             $stmt = $pdo->prepare($sql);
-             $stmt->execute($params);
-        }
+        try {
+            // Logic Filter sama seperti sebelumnya
+            list($where, $params) = buildWhere('geotags', $pdo);
+            
+            if (isset($_POST['selected_ids']) && !empty($_POST['selected_ids'])) {
+                 $ids = $_POST['selected_ids'];
+                 $ph = implode(',', array_fill(0, count($ids), '?'));
+                 $sql = "SELECT geotags.*, projects.officers FROM geotags LEFT JOIN projects ON geotags.projectId = projects.projectId WHERE geotags.id IN ($ph) ORDER BY geotags.id DESC";
+                 $stmt = $pdo->prepare($sql);
+                 $stmt->execute($ids);
+            } else {
+                 $sql = "SELECT geotags.*, projects.officers FROM geotags LEFT JOIN projects ON geotags.projectId = projects.projectId " . ($where ? "WHERE " . implode(' AND ', $where) : "") . " ORDER BY geotags.id DESC";
+                 $stmt = $pdo->prepare($sql);
+                 $stmt->execute($params);
+            }
 
-        $data = [];
-        while($r = $stmt->fetch()) {
-            // Kita format URL fotonya sekalian biar Client ga pusing
-            $r['full_photo_url'] = get_photo_url($r['photoPath'], $photo_base_url);
-            $data[] = $r;
+            $data = [];
+            while($r = $stmt->fetch()) {
+                // Pastikan URL foto valid
+                $r['full_photo_url'] = get_photo_url($r['photoPath'], $photo_base_url);
+                $data[] = $r;
+            }
+            
+            echo json_encode(['status' => 'success', 'data' => $data]);
+            
+        } catch (Exception $e) {
+            // Tangkap Error SQL jika ada
+            http_response_code(500);
+            echo json_encode(['status' => 'error', 'message' => $e->getMessage()]);
         }
-        
-        echo json_encode(['status' => 'success', 'data' => $data]);
         exit;
     }
     // --- END TAMBAHAN BARU ---
