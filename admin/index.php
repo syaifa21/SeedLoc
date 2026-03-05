@@ -40,10 +40,6 @@ foreach($filter_keys as $key) {
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
 
-
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/FileSaver.js/2.0.5/FileSaver.min.js"></script>
-
     <style>
         /* BASE STYLES */
         body{font-family:'Segoe UI', sans-serif;background:#f4f6f8;margin:0;display:flex;height:100vh;overflow:hidden;color:#333}
@@ -649,228 +645,126 @@ if(isset($_SESSION['swal_error'])){ echo "<script>Swal.fire({icon:'error',title:
 <div id="imgModal" class="modal" onclick="this.style.display='none'"><img class="modal-content" id="modalImg"></div>
 
 <script>
-/**
- * ==========================================
- * BAGIAN 1: FUNGSI GLOBAL (WAJIB DI LUAR DOM)
- * ==========================================
- */
+// --- GLOBAL FUNCTIONS & HELPERS ---
+function toggle(s){var c=document.querySelectorAll('input[name="selected_ids[]"]');for(var i=0;i<c.length;i++)c[i].checked=s.checked;}
+function showModal(s){ document.getElementById('imgModal').style.display="flex"; document.getElementById('modalImg').src=s; }
 
-// Helper UI Sederhana
-function toggle(s) {
-    var c = document.querySelectorAll('input[name="selected_ids[]"]');
-    for (var i = 0; i < c.length; i++) c[i].checked = s.checked;
-}
-
-function showModal(s) {
-    document.getElementById('imgModal').style.display = "flex";
-    document.getElementById('modalImg').src = s;
-}
-
-function switchTable(id) {
-    document.querySelectorAll('.monitor-table').forEach(el => el.style.display = 'none');
-    if (document.getElementById(id)) document.getElementById(id).style.display = 'block';
-}
-
-// ---------------------------------------------------------
-// LOGIKA EXPORT (SERVER SIDE VS CLIENT SIDE)
-// ---------------------------------------------------------
-
-async function downloadExport(type) {
-    // Tentukan Label Tipe
-    let titleType = type === 'download_zip' ? 'ZIP' : (type === 'csv' ? 'CSV' : 'KML');
-
-    // Tampilkan Pilihan
-    const choice = await Swal.fire({
-        title: `Pilih Metode Export ${titleType}`,
-        icon: 'question',
-        html: `
-            <div style="text-align:left; font-size:14px; line-height:1.5;">
-                <p><b>1. Server Side (Stabil)</b><br>
-                Proses di Server. Cocok untuk data sangat banyak. Langsung download 1 file jadi.</p>
-                <p><b>2. Client Side (Laptop)</b><br>
-                Proses di Laptop via Browser. Ada progress bar realtime. Menggunakan RAM laptop.</p>
-            </div>
-        `,
-        showDenyButton: true,
-        showCancelButton: true,
-        confirmButtonText: '<i class="fas fa-server"></i> Server Side',
-        confirmButtonColor: '#2E7D32',
-        denyButtonText: '<i class="fas fa-laptop"></i> Client Side',
-        denyButtonColor: '#1976d2',
-        cancelButtonText: 'Batal'
-    });
-
-    if (choice.isConfirmed) {
-        processServerExport(type);
-    } else if (choice.isDenied) {
-        processClientExport(type);
-    }
-}
-
-// Opsi 1: Server Side (Redirect Biasa)
-function processServerExport(type) {
-    const form = document.getElementById('filterForm');
-    const formData = new FormData(form);
-    const params = new URLSearchParams(formData);
-    params.append('action', 'export_full');
-    params.append('type', type);
-
-    Swal.fire({
-        title: 'Memproses di Server...',
-        html: 'Harap tunggu. File akan otomatis terunduh.<br><small>Jangan tutup halaman ini.</small>',
-        didOpen: () => Swal.showLoading()
-    });
-
-    // Trigger download
-    window.location.href = 'actions.php?' + params.toString();
+// --- 1. FILTER INJECTION (Agar Filter tidak hilang saat POST Action: Hapus/Bulk) ---
+function injectFiltersToForm(formId) {
+    const form = document.getElementById(formId);
+    if(!form) return;
     
-    // Tutup loading estimasi 3 detik
-    setTimeout(() => Swal.close(), 3000);
-}
+    // Bersihkan input hidden lama agar tidak duplikat
+    form.querySelectorAll('.dynamic-ret').forEach(el => el.remove());
 
-// Opsi 2: Client Side (Fetch JSON -> Build File)
-async function processClientExport(type) {
-    const form = document.getElementById('filterForm');
-    const formData = new FormData(form);
+    const params = new URLSearchParams(window.location.search);
+    const keys = ['search', 'page', 'projectId', 'condition', 'start_date', 'end_date', 'locationName', 'itemType', 'has_photo', 'is_duplicate'];
     
-    // Tentukan endpoint JSON: ZIP butuh "get_json_photos", CSV/KML butuh "get_json_full"
-    let jsonAction = (type === 'download_zip') ? 'get_json_photos' : 'get_json_full';
-    
-    formData.append('action', 'export_full');
-    formData.append('type', jsonAction);
-
-    Swal.fire({
-        title: 'Mengambil Data...',
-        text: 'Sedang meminta data mentah dari server...',
-        allowOutsideClick: false,
-        showConfirmButton: false,
-        didOpen: () => Swal.showLoading()
-    });
-
-    try {
-        // A. Ambil Data JSON
-        const response = await fetch('actions.php', { method: 'POST', body: formData });
-        const result = await response.json();
-
-        if (result.status !== 'success' || !result.data || result.data.length === 0) {
-            throw new Error("Tidak ada data ditemukan untuk diexport.");
+    keys.forEach(key => {
+        const val = params.get(key);
+        if(val) {
+            const input = document.createElement('input');
+            input.type = 'hidden';
+            input.name = 'ret_' + key; // Sesuai dengan logic di actions.php
+            input.value = val;
+            input.className = 'dynamic-ret';
+            form.appendChild(input);
         }
+    });
+}
 
-        const data = result.data;
-        Swal.update({ title: 'Menyusun File...', html: `Memproses ${data.length} data di laptop...` });
+function confirmDel(id){ 
+    Swal.fire({title:'Hapus Data?',icon:'warning',showCancelButton:true,confirmButtonColor:'#d33',confirmButtonText:'Ya, Hapus'}).then((r)=>{ 
+        if(r.isConfirmed){ 
+            document.getElementById('delId').value = id; 
+            injectFiltersToForm('delForm'); // Inject Filter sebelum submit
+            document.getElementById('delForm').submit(); 
+        } 
+    }); 
+}
 
-        // B. Generate File Sesuai Tipe
-        if (type === 'download_zip') {
-            await generateZipClient(data);
-        } 
-        else if (type === 'csv') {
-            generateCSVClient(data);
-        } 
-        else if (type === 'kml') {
-            generateKMLClient(data);
+function confirmBulk(){ 
+    var s=document.querySelector('select[name="bulk_action_type"]'); 
+    if(s.value==''){ Swal.fire('Info','Pilih aksi dulu','info'); return; } 
+    Swal.fire({title:'Yakin proses massal?',icon:'warning',showCancelButton:true}).then((r)=>{ 
+        if(r.isConfirmed) {
+            injectFiltersToForm('bulkForm'); // Inject Filter sebelum submit
+            document.getElementById('realBulkBtn').click(); 
         }
-
-    } catch (error) {
-        Swal.fire('Gagal', error.message || 'Terjadi kesalahan.', 'error');
-    }
+    }); 
 }
 
-// --- GENERATOR FILE CLIENT SIDE ---
-
-function generateCSVClient(data) {
-    // Header CSV dengan BOM UTF-8
-    let csvContent = "\uFEFFID,ProjectID,Officer,Lat,Lng,Loc,Time,Type,Cond,Detail,Photo URL\n";
-
-    data.forEach(r => {
-        // Bersihkan data agar CSV tidak rusak (escape tanda kutip)
-        const clean = (text) => `"${(text || '').toString().replace(/"/g, '""')}"`;
-        
-        let row = [
-            clean(r.id), clean(r.projectId), clean(r.officers), 
-            clean(r.latitude), clean(r.longitude), clean(r.locationName), 
-            clean(r.timestamp), clean(r.itemType), clean(r.condition), 
-            clean(r.details), clean(r.full_photo_url)
-        ].join(",");
-        
-        csvContent += row + "\n";
-    });
-
-    const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8" });
-    saveAs(blob, `Export_Client_${new Date().toISOString().slice(0,10)}.csv`);
-    Swal.fire('Selesai', 'File CSV berhasil dibuat.', 'success');
+function viewDetail(data) {
+    var photoUrl = data.photoPath ? (data.photoPath.startsWith('http') ? data.photoPath : '<?=$photo_base_url?>' + data.photoPath) : '';
+    var html = `<div style="text-align:center;margin-bottom:15px;">${photoUrl ? `<img src="${photoUrl}" style="width:150px;height:200px;border-radius:8px;cursor:pointer;" onclick="showModal('${photoUrl}')">` : 'No Photo'}</div>
+    <table style="width:100%;">
+    <tr><td><b>JENIS</b></td><td>${data.itemType}</td></tr>
+    <tr><td><b>PETUGAS</b></td><td>${data.officers||'-'}</td></tr>
+    <tr><td><b>LOKASI</b></td><td>${data.locationName}</td></tr>
+    <tr><td><b>KONDISI</b></td><td>${data.condition}</td></tr>
+    <tr><td><b>LAT, LNG</b></td><td>${data.latitude}, ${data.longitude}</td></tr>
+    <tr><td><b>WAKTU</b></td><td>${data.timestamp}</td></tr>
+    <tr><td><b>DETAIL</b></td><td>${data.details||'-'}</td></tr>
+    </table>`;
+    document.getElementById('detailContent').innerHTML = html; document.getElementById('detailModal').style.display = 'flex';
 }
 
-function generateKMLClient(data) {
-    // Trik: Pisahkan '<' dan '?' agar PHP tidak mengira ini tag PHP
-    let kml = '<' + '?xml version="1.0" encoding="UTF-8"?' + '>\n' +
-              '<kml xmlns="http://www.opengis.net/kml/2.2">\n' +
-              '<Document>\n' +
-              '<name>Export Client Side</name>';
+// --- MAIN JAVASCRIPT LOGIC ---
+document.addEventListener("DOMContentLoaded", function() {
 
-    data.forEach(r => {
-        const desc = `Tipe: ${r.itemType}\nKondisi: ${r.condition}\nPetugas: ${r.officers||'-'}\nWaktu: ${r.timestamp}`;
-        // Escape XML Special Chars
-        const safeDesc = desc.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-        const safeName = `#${r.id} - ${r.itemType}`;
-        
-        kml += `
-        <Placemark>
-            <name>${safeName}</name>
-            <description>${safeDesc}</description>
-            <Point><coordinates>${r.longitude},${r.latitude}</coordinates></Point>
-        </Placemark>`;
-    });
+    // 2. NAVIGATION INTERCEPTOR (Agar Filter terbawa saat pindah menu Sidebar)
+    const navLinks = document.querySelectorAll('.nav a, .btn-d[href^="?action="]'); 
+    
+    navLinks.forEach(link => {
+        link.addEventListener('click', function(e) {
+            // Abaikan logout atau link javascript void
+            if(this.getAttribute('href').startsWith('javascript') || this.href.includes('action=logout')) return;
+            
+            e.preventDefault(); // Stop loading standar
+            
+            const targetUrl = new URL(this.href, window.location.origin);
+            const targetParams = targetUrl.searchParams;
+            const currentParams = new URLSearchParams(window.location.search);
+            
+            // Daftar Filter yg harus dibawa saat pindah menu
+            const filtersToKeep = ['locationName', 'projectId', 'itemType', 'condition', 'start_date', 'end_date', 'search', 'has_photo', 'is_duplicate'];
+            
+            filtersToKeep.forEach(key => {
+                // Jika filter ada di URL sekarang & belum ada di URL tujuan, tambahkan
+                if(currentParams.has(key) && !targetParams.has(key)) {
+                    targetParams.append(key, currentParams.get(key));
+                }
+            });
 
-    kml += `</Document></kml>`;
-
-    const blob = new Blob([kml], { type: "application/vnd.google-earth.kml+xml" });
-    saveAs(blob, `Export_Client_${new Date().toISOString().slice(0,10)}.kml`);
-    Swal.fire('Selesai', 'File KML berhasil dibuat.', 'success');
-}
-
-async function generateZipClient(photos) {
-    const zip = new JSZip();
-    const total = photos.length;
-    let count = 0;
-
-    Swal.fire({
-        title: 'Download Foto',
-        html: `Proses: <b id="zip-c">0</b> / ${total}<br>
-               <div style="background:#ddd;height:10px;margin-top:5px;border-radius:5px;overflow:hidden;">
-                    <div id="zip-b" style="background:#2E7D32;height:100%;width:0%;transition:width 0.1s;"></div>
-               </div>
-               <small>Mohon jangan tutup browser.</small>`,
-        showConfirmButton: false, 
-        allowOutsideClick: false
-    });
-
-    // Loop download foto satu per satu
-    for (const photo of photos) {
-        try {
-            const blob = await fetch(photo.url).then(r => r.ok ? r.blob() : null);
-            if(blob) {
-                zip.file(photo.name, blob);
-                count++;
-                
-                // Update UI
-                const pct = Math.round((count/total)*100);
-                document.getElementById('zip-c').innerText = count;
-                document.getElementById('zip-b').style.width = pct + '%';
+            // Hapus 'page' jika action berubah (misal dari list page 10 ke map, page 10 ga relevan)
+            if(currentParams.get('action') !== targetParams.get('action')) {
+                targetParams.delete('page'); 
             }
-        } catch(e){
-            console.warn("Gagal download foto:", photo.url);
+
+            // Redirect Manual
+            window.location.href = targetUrl.pathname + '?' + targetParams.toString();
+        });
+    });
+
+    // 3. AJAX LOAD DATA (Khusus Geotags List)
+    const isGeotagsList = <?= ($action==='list' && $table==='geotags') ? 'true' : 'false' ?>;
+    
+    if(isGeotagsList) {
+        // Ambil page dari URL agar saat refresh tetap di halaman yang sama
+        const urlParams = new URLSearchParams(window.location.search);
+        const currPage = urlParams.get('page') || 1;
+        loadGeotagsData(currPage);
+
+        // Override Submit Form Filter
+        const form = document.getElementById('filterForm');
+        if(form) {
+            form.addEventListener('submit', function(e) {
+                e.preventDefault();
+                loadGeotagsData(1); // Reset ke page 1 saat filter baru
+            });
         }
     }
-    
-    Swal.update({ title: 'Menyimpan ZIP...', html: 'Sedang membungkus file akhir...' });
-    const content = await zip.generateAsync({ type: "blob" });
-    saveAs(content, `Export_Photos_Client.zip`);
-    Swal.fire('Selesai', `Berhasil mengunduh ${count} foto.`, 'success');
-}
-
-// ---------------------------------------------------------
-// LOGIKA AJAX LOAD TABLE & UTILITIES LAIN
-// ---------------------------------------------------------
+});
 
 function loadGeotagsData(page) {
     const form = document.getElementById('filterForm');
@@ -878,14 +772,13 @@ function loadGeotagsData(page) {
     const params = new URLSearchParams(formData);
     params.append('page', page);
 
-    // Update URL Browser (Agar saat refresh halaman tetap sama)
+    // --- UPDATE URL BROWSER (PENTING AGAR FILTER TERSIMPAN DI HISTORY) ---
     window.history.pushState(null, '', '?' + params.toString());
 
-    // Fake Loading Animation
     let timerInterval;
     Swal.fire({
         title: 'Memuat Data...',
-        html: 'Mengambil data terbaru.<br><b style="font-size:24px;color:#2E7D32;">0%</b>',
+        html: 'Sedang mengambil data.<br><b style="font-size:24px;color:#2E7D32;">0%</b>',
         allowOutsideClick: false,
         didOpen: () => {
             Swal.showLoading();
@@ -901,7 +794,6 @@ function loadGeotagsData(page) {
         willClose: () => { clearInterval(timerInterval); }
     });
 
-    // Fetch Data
     fetch('load_geotags.php?' + params.toString())
     .then(response => {
         if (!response.ok) throw new Error(`HTTP Error: ${response.status}`);
@@ -923,7 +815,7 @@ function loadGeotagsData(page) {
             }
         } catch (e) {
             console.error("Raw Response:", text);
-            Swal.fire({icon: 'error',title: 'Terjadi Kesalahan',html: `Response server tidak valid.`});
+            Swal.fire({icon: 'error',title: 'Terjadi Kesalahan',html: `Response server tidak valid (Bukan JSON).`});
         }
     })
     .catch(err => {
@@ -940,10 +832,14 @@ function renderTable(rows) {
         return;
     }
 
+    // Ambil Parameter URL saat ini untuk ditempel ke tombol Edit
     const currentParams = new URLSearchParams(window.location.search);
 
     rows.forEach(r => {
         const safeData = JSON.stringify(r.raw).replace(/"/g, '&quot;');
+        
+        // --- BUAT URL EDIT YANG MEMBAWA FILTER ---
+        // Kita copy params yang ada, lalu set action=edit dan id=...
         const editParams = new URLSearchParams(currentParams);
         editParams.set('action', 'edit');
         editParams.set('table', 'geotags');
@@ -1013,109 +909,15 @@ function renderPagination(pg) {
     container.innerHTML = html;
 }
 
-// Helpers Form & Action
-function injectFiltersToForm(formId) {
-    const form = document.getElementById(formId);
-    if(!form) return;
-    form.querySelectorAll('.dynamic-ret').forEach(el => el.remove());
-    const params = new URLSearchParams(window.location.search);
-    const keys = ['search', 'page', 'projectId', 'condition', 'start_date', 'end_date', 'locationName', 'itemType', 'has_photo', 'is_duplicate'];
-    keys.forEach(key => {
-        const val = params.get(key);
-        if(val) {
-            const input = document.createElement('input');
-            input.type = 'hidden'; input.name = 'ret_' + key; input.value = val; input.className = 'dynamic-ret';
-            form.appendChild(input);
-        }
-    });
+async function downloadExport(type) {
+    const form = document.getElementById('filterForm');
+    const params = new URLSearchParams(new FormData(form));
+    params.set('action', 'export_full');
+    params.set('type', type);
+    Swal.fire({title:'Export Data',text:'Sedang memproses...',didOpen:()=>{Swal.showLoading()}});
+    window.location.href = '?' + params.toString();
+    setTimeout(() => Swal.close(), 2000); 
 }
-
-function confirmDel(id){ 
-    Swal.fire({title:'Hapus Data?',icon:'warning',showCancelButton:true,confirmButtonColor:'#d33',confirmButtonText:'Ya, Hapus'}).then((r)=>{ 
-        if(r.isConfirmed){ 
-            document.getElementById('delId').value = id; 
-            injectFiltersToForm('delForm'); 
-            document.getElementById('delForm').submit(); 
-        } 
-    }); 
-}
-
-function confirmBulk(){ 
-    var s=document.querySelector('select[name="bulk_action_type"]'); 
-    if(s.value==''){ Swal.fire('Info','Pilih aksi dulu','info'); return; } 
-    Swal.fire({title:'Yakin proses massal?',icon:'warning',showCancelButton:true}).then((r)=>{ 
-        if(r.isConfirmed) {
-            injectFiltersToForm('bulkForm'); 
-            document.getElementById('realBulkBtn').click(); 
-        }
-    }); 
-}
-
-function viewDetail(data) {
-    var html = `<table style="width:100%;">
-    <tr><td><b>JENIS</b></td><td>${data.itemType}</td></tr>
-    <tr><td><b>PETUGAS</b></td><td>${data.officers||'-'}</td></tr>
-    <tr><td><b>LOKASI</b></td><td>${data.locationName}</td></tr>
-    <tr><td><b>KONDISI</b></td><td>${data.condition}</td></tr>
-    <tr><td><b>KOORDINAT</b></td><td>${data.latitude}, ${data.longitude}</td></tr>
-    <tr><td><b>WAKTU</b></td><td>${data.timestamp}</td></tr>
-    <tr><td><b>DETAIL</b></td><td>${data.details||'-'}</td></tr>
-    </table>`;
-    document.getElementById('detailContent').innerHTML = html; 
-    document.getElementById('detailModal').style.display = 'flex';
-}
-
-/**
- * ==========================================
- * BAGIAN 2: EVENT LISTENERS (SAAT DOM READY)
- * ==========================================
- */
-document.addEventListener("DOMContentLoaded", function() {
-
-    // 1. Navigation Filter Interceptor (Agar filter terbawa saat pindah sidebar)
-    const navLinks = document.querySelectorAll('.nav a, .btn-d[href^="?action="]'); 
-    
-    navLinks.forEach(link => {
-        link.addEventListener('click', function(e) {
-            if(this.getAttribute('href').startsWith('javascript') || this.href.includes('action=logout')) return;
-            e.preventDefault(); 
-            
-            const targetUrl = new URL(this.href, window.location.origin);
-            const targetParams = targetUrl.searchParams;
-            const currentParams = new URLSearchParams(window.location.search);
-            const filtersToKeep = ['locationName', 'projectId', 'itemType', 'condition', 'start_date', 'end_date', 'search', 'has_photo', 'is_duplicate'];
-            
-            filtersToKeep.forEach(key => {
-                if(currentParams.has(key) && !targetParams.has(key)) {
-                    targetParams.append(key, currentParams.get(key));
-                }
-            });
-
-            if(currentParams.get('action') !== targetParams.get('action')) {
-                targetParams.delete('page'); 
-            }
-            window.location.href = targetUrl.pathname + '?' + targetParams.toString();
-        });
-    });
-
-    // 2. Initial Data Load (Khusus List Geotags)
-    const urlParams = new URLSearchParams(window.location.search);
-    const isGeotagsList = (urlParams.get('action') === 'list' && urlParams.get('table') === 'geotags');
-    
-    if(isGeotagsList) {
-        const currPage = urlParams.get('page') || 1;
-        loadGeotagsData(currPage);
-
-        // Override Form Submit agar pakai AJAX
-        const form = document.getElementById('filterForm');
-        if(form) {
-            form.addEventListener('submit', function(e) {
-                e.preventDefault();
-                loadGeotagsData(1); 
-            });
-        }
-    }
-});
 </script>
 
 <?php endif; ?>
