@@ -1,40 +1,9 @@
 <?php
-// index.php - FIXED FILTERS (Photo & Duplicate) & UPDATED UI POPUP
+// index.php - FIXED FILTERS (Photo & Duplicate)
 
 require_once 'config.php';
 require_once 'functions.php';
 require_once 'actions.php';
-
-// =================================================================
-// ENDPOINT API KHUSUS CLIENT-SIDE EXPORT (Memperbaiki error ZIP kosong)
-// =================================================================
-if (isset($_GET['ajax_export'])) {
-    header('Content-Type: application/json');
-    list($where, $params) = buildWhere('geotags', $pdo);
-    $w_sql = $where ? "WHERE " . implode(' AND ', $where) : "";
-    
-    $sql = "SELECT geotags.*, projects.officers 
-            FROM geotags 
-            LEFT JOIN projects ON geotags.projectId = projects.projectId 
-            $w_sql ORDER BY geotags.id DESC";
-            
-    try {
-        $stmt = $pdo->prepare($sql);
-        $stmt->execute($params);
-        $data = $stmt->fetchAll();
-        
-        // Buat URL foto lengkap untuk diproses oleh JavaScript (Client-side)
-        foreach($data as &$row) {
-            $row['full_photo_url'] = !empty($row['photoPath']) ? get_photo_url($row['photoPath'], $photo_base_url) : '';
-        }
-        
-        echo json_encode(['status' => 'success', 'data' => $data]);
-    } catch (Exception $e) {
-        echo json_encode(['status' => 'error', 'message' => $e->getMessage()]);
-    }
-    exit;
-}
-// =================================================================
 
 // Optimization: Load Data PHP hanya untuk Dashboard & List NON-Geotags
 if ($action === 'list' && $table === 'geotags') {
@@ -71,11 +40,13 @@ foreach($filter_keys as $key) {
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
 
+
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/FileSaver.js/2.0.5/FileSaver.min.js"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.5.28/jspdf.plugin.autotable.min.js"></script>
 
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.5.29/jspdf.plugin.autotable.min.js"></script>
     <style>
         /* BASE STYLES */
         body{font-family:'Segoe UI', sans-serif;background:#f4f6f8;margin:0;display:flex;height:100vh;overflow:hidden;color:#333}
@@ -110,6 +81,8 @@ foreach($filter_keys as $key) {
         .pagination a.disabled { color: #ccc; pointer-events: none; border-color: #eee; }
 
         /* MODALS & OTHERS */
+        .modal{display:none;position:fixed;z-index:3000;left:0;top:0;width:100%;height:100%;background:rgba(0,0,0,0.85);justify-content:center;align-items:center;flex-direction:column}
+        .modal-content{max-width:90%;max-height:85%;border-radius:5px;box-shadow:0 0 20px rgba(0,0,0,0.5)}
         .status-badge{padding:4px 8px;border-radius:4px;font-size:11px;font-weight:bold;text-transform:uppercase}
         .status-Active{background:#e8f5e9;color:#2E7D32} .status-Completed{background:#e3f2fd;color:#1976d2}
         
@@ -160,6 +133,8 @@ if(isset($_SESSION['swal_error'])){ echo "<script>Swal.fire({icon:'error',title:
 
 <main class="main">
     
+   
+
     <?php if($action === 'dashboard'): ?>
         <div class="header"><h2>Overview Dashboard</h2></div>
         
@@ -246,7 +221,7 @@ if(isset($_SESSION['swal_error'])){ echo "<script>Swal.fire({icon:'error',title:
         <script>function switchTable(id){document.querySelectorAll('.monitor-table').forEach(el=>el.style.display='none');if(document.getElementById(id))document.getElementById(id).style.display='block';}</script>
 
     <?php elseif($action === 'map'): ?>
-        
+        <
         <div class="header"><h2>Peta Sebaran Real-time</h2></div>
         
         <form class="filter-bar">
@@ -348,8 +323,12 @@ if(isset($_SESSION['swal_error'])){ echo "<script>Swal.fire({icon:'error',title:
                 chunkDelay: 50
             });
 
+            // C. MARKER CLUSTERING & DATA RENDERING
+            var markers = L.markerClusterGroup({ chunkedLoading: true, chunkInterval: 200, chunkDelay: 50 });
+
+            // FIX: Tambahkan fallback "[]" jika data kosong agar JS tidak error
             var pts = <?= json_encode($map_data ?? []) ?>; 
-            if (!Array.isArray(pts)) pts = []; 
+            if (!Array.isArray(pts)) pts = []; // Safety check tambahan
 
             var bounds = [];
             var mapDataStore = {}; // Global store untuk akses data di Modal
@@ -357,7 +336,7 @@ if(isset($_SESSION['swal_error'])){ echo "<script>Swal.fire({icon:'error',title:
             // Helper: Buka Modal Detail dari Klik Marker
             window.openDetailFromMap = function(id) {
                 if(mapDataStore[id]) {
-                    viewDetail(mapDataStore[id]);
+                    viewDetail(mapDataStore[id]); // Panggil fungsi global viewDetail
                 }
             };
 
@@ -393,7 +372,7 @@ if(isset($_SESSION['swal_error'])){ echo "<script>Swal.fire({icon:'error',title:
 
                         var photoUrl = p.photoPath ? (p.photoPath.startsWith('http') ? p.photoPath : '<?=$photo_base_url?>' + p.photoPath) : '';
                         
-                        // Isi Popup di Peta
+                        // Isi Popup
                         var popupContent = `
                             <div style="min-width:200px; text-align:center;">
                                 <b style="font-size:14px;">${p.itemType}</b> <br>
@@ -403,7 +382,7 @@ if(isset($_SESSION['swal_error'])){ echo "<script>Swal.fire({icon:'error',title:
                                 
                                 <div style="margin-top:10px; display:flex; gap:5px;">
                                     <button onclick="openDetailFromMap('${p.id}')" class="btn btn-i" style="flex:1; padding:5px; font-size:11px; border-radius:4px;">
-                                        <i class="fas fa-info-circle"></i> Detail Pop-up
+                                        <i class="fas fa-info-circle"></i> Detail
                                     </button>
                                     <a href="?action=edit&table=geotags&id=${p.id}" class="btn btn-b" style="flex:1; padding:5px; font-size:11px; text-decoration:none; color:white; border-radius:4px;">
                                         <i class="fas fa-edit"></i> Edit
@@ -427,7 +406,7 @@ if(isset($_SESSION['swal_error'])){ echo "<script>Swal.fire({icon:'error',title:
                     if(bounds.length) m.fitBounds(bounds);
                 <?php endif; ?>
                 
-            }, 500); 
+            }, 500); // Delay render agar UI siap
         </script>
 
 
@@ -485,6 +464,16 @@ if(isset($_SESSION['swal_error'])){ echo "<script>Swal.fire({icon:'error',title:
             
             <button class="btn btn-b" type="submit"><i class="fas fa-search"></i> Cari</button> 
             <a href="?action=list&table=<?=$table?>" class="btn btn-d"><i class="fas fa-sync"></i></a>
+            
+            <?php if($table=='geotags'): ?>
+                <div style="display:flex; gap:5px; align-items:center; background:#e8f5e9; padding:5px 10px; border-radius:6px; margin-left:auto;">
+                    <span style="font-size:11px; font-weight:bold; color:#2E7D32;">EXPORT:</span>
+                    <a href="javascript:void(0)" onclick="downloadExport('csv')" class="btn btn-i" style="padding:4px 8px; font-size:11px;">CSV</a>
+                    <a href="javascript:void(0)" onclick="downloadExport('download_zip')" class="btn btn-w" style="padding:4px 8px; font-size:11px;">ZIP</a>
+                    <a href="javascript:void(0)" onclick="downloadExport('kml')" class="btn btn-b" style="padding:4px 8px; font-size:11px;">KML</a>
+                    <a href="javascript:void(0)" onclick="downloadExport('pdf')" class="btn btn-d" style="padding:4px 8px; font-size:11px; background:#d32f2f;">PDF</a>
+                </div>
+            <?php endif; ?>
         </form>
 
         <form method="post" id="bulkForm">
@@ -493,7 +482,7 @@ if(isset($_SESSION['swal_error'])){ echo "<script>Swal.fire({icon:'error',title:
             <div style="background:#e8f5e9;padding:12px;border-radius:8px;margin-bottom:15px;display:flex;gap:10px;align-items:center;border:1px solid #c8e6c9;flex-wrap:wrap;">
                 <i class="fas fa-check-square" style="color:#2E7D32;"></i> <b>Aksi Terpilih:</b> 
                 <select name="bulk_action_type" required style="border-color:#2E7D32;" onchange="toggleBulkInputs(this.value)">
-                    <option value="">-- Pilih Aksi --</option><option value="mass_edit_type">Ubah Jenis Pohon</option><option value="delete_selected">Hapus Data</option>
+                    <option value="">-- Pilih Aksi --</option><option value="mass_edit_type">Ubah Jenis Pohon</option><option value="download_zip">Download Foto (ZIP)</option><option value="export_csv">Export CSV</option><option value="delete_selected">Hapus Data</option>
                 </select>
                 <select name="new_tree_type" id="newTreeTypeInput" style="display:none; border-color:#1976d2;"><option value="">-- Pilih Jenis Baru --</option><?php foreach($tree_types as $t): ?><option value="<?=htmlspecialchars($t)?>"><?=htmlspecialchars($t)?></option><?php endforeach; ?></select>
                 <button type="button" onclick="confirmBulk()" class="btn btn-w">Proses</button> <button name="bulk_action" id="realBulkBtn" style="display:none;"></button><input type="hidden" name="csrf_token" value="<?=$_SESSION['csrf_token']?>">
@@ -508,22 +497,17 @@ if(isset($_SESSION['swal_error'])){ echo "<script>Swal.fire({icon:'error',title:
                             <?php if($table=='geotags'): ?>
                                 <th width="30"><input type="checkbox" onclick="toggle(this)"></th><th width="40">No</th><th>Foto</th><th>ID</th><th>Jenis</th><th>Petugas</th><th>Lokasi</th><th>Koordinat</th><th>Tanggal</th><th>Kondisi</th>
                             <?php else: ?>
-                                <th>ID Project</th><th>Nama Kegiatan</th><th>Lokasi Project</th><th>Petugas</th><th>Status</th>
+                                <th>ID</th><th>Nama Kegiatan</th><th>Lokasi Project</th><th>Petugas</th><th>Status</th>
                             <?php endif; ?>
                             <th style="text-align:right;">Aksi</th>
                         </tr>
                     </thead>
                     <tbody id="<?= ($table=='geotags') ? 'geotagsTableBody' : '' ?>">
-                        <?php if($table != 'geotags'): ?>
+                        <?php if($table != 'geotags'): // Render PHP Biasa untuk Projects ?>
                             <?php if(empty($list_data)): ?><tr><td colspan="11" align="center" style="padding:30px;">Tidak ada data.</td></tr><?php else: foreach($list_data as $r): ?>
                                 <tr>
                                     <td><b>#<?=$r['projectId']?></b></td><td><?=$r['activityName']?></td><td><?=$r['locationName']?></td><td><?=$r['officers']?></td><td><span class="status-badge status-<?=$r['status']?>"><?=$r['status']?></span></td>
-                                    <td style="text-align:right;">
-                                        <button type="button" onclick="chooseExport('<?=$r['projectId']?>')" class="btn btn-w" title="Download Export Project"><i class="fas fa-download"></i> Export</button> 
-                                        
-                                        <a href="?action=edit&table=projects&id=<?=$r['projectId']?>" class="btn btn-b"><i class="fas fa-edit"></i></a> 
-                                        <button type="button" onclick="confirmDel('<?=$r['projectId']?>')" class="btn btn-d"><i class="fas fa-trash"></i></button>
-                                    </td>
+                                    <td style="text-align:right;"><a href="?action=edit&table=projects&id=<?=$r['projectId']?>" class="btn btn-b"><i class="fas fa-edit"></i></a> <button type="button" onclick="confirmDel('<?=$r['projectId']?>')" class="btn btn-d"><i class="fas fa-trash"></i></button></td>
                                 </tr>
                             <?php endforeach; endif; ?>
                         <?php endif; ?>
@@ -551,7 +535,7 @@ if(isset($_SESSION['swal_error'])){ echo "<script>Swal.fire({icon:'error',title:
             <form class="filter-bar"><input type="hidden" name="action" value="gallery"><input type="text" name="search" placeholder="Cari..." value="<?=htmlspecialchars($_GET['search']??'')?>"><button class="btn btn-p">Cari</button></form>
             <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:15px;">
                 <?php if(!empty($list_data)): foreach($list_data as $r): $i=get_photo_url($r['photoPath']??'', $photo_base_url); if(!$i) continue; ?>
-                <div class="card" style="padding:0;overflow:hidden;cursor:pointer;" onclick='viewDetail(<?=json_encode($r)?>)'>
+                <div class="card" style="padding:0;overflow:hidden;" onclick="viewDetail(<?=htmlspecialchars(json_encode($r))?>)">
                     <img src="<?=$i?>" style="width:100%;height:150px;object-fit:cover;">
                     <div style="padding:10px;"><b style="font-size:14px;"><?=$r['itemType']?></b><br><small><?=$r['locationName']?></small></div>
                 </div>
@@ -573,14 +557,14 @@ if(isset($_SESSION['swal_error'])){ echo "<script>Swal.fire({icon:'error',title:
                     <input type="hidden" name="id" value="<?=$d['id']??''?>">
                     
                     <div style="margin-bottom:15px;">
-                        <label style="font-weight:bold; color:#2E7D32;">Titik Koordinat</label>
+                        <label style="font-weight:bold; color:#2E7D32;">Titik Koordinat (Geser Marker untuk Update)</label>
                         <div id="mapPicker" style="height:300px; width:100%; border:1px solid #ccc; border-radius:8px; margin-top:5px;"></div>
-                        <small style="color:#666;">*Lokasi titik koordinat tidak dapat diubah (Read-only).</small>
+                        <small style="color:#666;">*Geser pin biru di peta, atau isi manual di bawah.</small>
                     </div>
 
                     <div style="display:grid;grid-template-columns:1fr 1fr;gap:15px;margin-bottom:15px;">
-                        <div><label>Latitude</label><input type="text" name="latitude" id="inputLat" value="<?=$d['latitude']??''?>" style="width:100%;background:#f5f5f5;" required readonly></div>
-                        <div><label>Longitude</label><input type="text" name="longitude" id="inputLng" value="<?=$d['longitude']??''?>" style="width:100%;background:#f5f5f5;" required readonly></div>
+                        <div><label>Latitude</label><input type="text" name="latitude" id="inputLat" value="<?=$d['latitude']??''?>" style="width:100%;" required></div>
+                        <div><label>Longitude</label><input type="text" name="longitude" id="inputLng" value="<?=$d['longitude']??''?>" style="width:100%;" required></div>
                     </div>
                     
                     <div style="margin-bottom:15px;"><label>Project ID</label><input type="number" name="projectId" value="<?=$d['projectId']??''?>" style="width:100%;"></div>
@@ -596,24 +580,52 @@ if(isset($_SESSION['swal_error'])){ echo "<script>Swal.fire({icon:'error',title:
                         var lat = parseFloat(document.getElementById('inputLat').value) || -6.9; // Default Jabar
                         var lng = parseFloat(document.getElementById('inputLng').value) || 107.6;
                         
+                        // 1. Inisialisasi Peta
                         var mapP = L.map('mapPicker').setView([lat, lng], 15);
                         
+                        // 2. Base Layers
                         var streetsP = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { attribution: '&copy; OpenStreetMap' }).addTo(mapP);
                         var satP = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', { attribution: '&copy; Esri' });
                         
+                        // 3. Layer Control
                         var baseMapsP = { "Peta Jalan": streetsP, "Satelit": satP };
                         var overlayMapsP = {};
                         
+                        // 4. LOAD KML LAYER (Fitur Baru)
                         <?php if(file_exists($kml_file_path)): ?>
+                            // Tambahkan layer KML ke peta edit
                             var kmlLayerP = omnivore.kml('<?=$kml_url_path?>?t=<?=time()?>').on('ready', function() {
-                                this.addTo(mapP); 
-                                <?php if(!$is_edit): ?> mapP.fitBounds(this.getBounds()); <?php endif; ?>
+                                this.addTo(mapP); // Langsung tampilkan
+                                // Opsional: Zoom ke area KML jika ini data baru (bukan edit)
+                                <?php if(!$is_edit): ?>
+                                    mapP.fitBounds(this.getBounds());
+                                <?php endif; ?>
                             });
                             overlayMapsP["Batas Area (KML)"] = kmlLayerP;
                         <?php endif; ?>
                         
                         L.control.layers(baseMapsP, overlayMapsP).addTo(mapP);
-                        var markerP = L.marker([lat, lng]).addTo(mapP);
+
+                        // 5. Marker Draggable
+                        var markerP = L.marker([lat, lng], {draggable: true}).addTo(mapP);
+
+                        markerP.on('dragend', function(event) {
+                            var position = event.target.getLatLng();
+                            document.getElementById('inputLat').value = position.lat.toFixed(7);
+                            document.getElementById('inputLng').value = position.lng.toFixed(7);
+                        });
+
+                        function updateMapFromInput() {
+                            var la = parseFloat(document.getElementById('inputLat').value);
+                            var lo = parseFloat(document.getElementById('inputLng').value);
+                            if(!isNaN(la) && !isNaN(lo)) {
+                                markerP.setLatLng([la, lo]);
+                                mapP.panTo([la, lo]);
+                            }
+                        }
+                        
+                        document.getElementById('inputLat').addEventListener('change', updateMapFromInput);
+                        document.getElementById('inputLng').addEventListener('change', updateMapFromInput);
 
                         setTimeout(function(){ mapP.invalidateSize(); }, 500);
                     });
@@ -637,6 +649,8 @@ if(isset($_SESSION['swal_error'])){ echo "<script>Swal.fire({icon:'error',title:
     <?php endif; ?>
 </main>
 
+<div id="detailModal" class="modal" style="display:none;"><div class="modal-content" style="width:500px;background:#fff;border-radius:8px;overflow:hidden;"><div style="background:#2E7D32;padding:15px;color:#fff;font-weight:bold;">Detail Data <span onclick="document.getElementById('detailModal').style.display='none'" style="float:right;cursor:pointer;">&times;</span></div><div id="detailContent" style="padding:20px;max-height:80vh;overflow-y:auto;"></div></div></div>
+<div id="imgModal" class="modal" onclick="this.style.display='none'"><img class="modal-content" id="modalImg"></div>
 
 <script>
 /**
@@ -661,44 +675,23 @@ function switchTable(id) {
 }
 
 // ---------------------------------------------------------
-// LOGIKA EXPORT (DIPINDAH KE DATA PROJECTS)
+// LOGIKA EXPORT (SERVER SIDE VS CLIENT SIDE)
 // ---------------------------------------------------------
 
-async function chooseExport(projectId) {
-    const typeChoice = await Swal.fire({
-        title: `Export Project #${projectId}`,
-        text: 'Pilih format file export:',
-        input: 'select',
-        inputOptions: {
-            'csv': 'CSV (Data Tabel Excel)',
-            'download_zip': 'ZIP (Kumpulan Foto)',
-            'kml': 'KML (Peta Google Earth)',
-            'pdf': 'PDF (Laporan dengan Foto)'
-        },
-        inputPlaceholder: '-- Pilih Format --',
-        showCancelButton: true,
-        confirmButtonText: 'Lanjut <i class="fas fa-arrow-right"></i>',
-        cancelButtonText: 'Batal'
-    });
-
-    if (typeChoice.isConfirmed && typeChoice.value) {
-        const type = typeChoice.value;
-        triggerDownload(type, projectId);
-    }
-}
-
-async function triggerDownload(type, projectId) {
+async function downloadExport(type) {
+    // Label Tipe
     let titleType = type === 'download_zip' ? 'ZIP' : (type === 'csv' ? 'CSV' : (type === 'pdf' ? 'PDF' : 'KML'));
 
+    // HTML Pilihan
     const choice = await Swal.fire({
-        title: `Metode Download ${titleType}`,
+        title: `Export ${titleType}`,
         icon: 'question',
         html: `
             <div style="text-align:left; font-size:14px; line-height:1.5;">
                 <p><b>1. Server Side</b><br>
-                Proses cepat & ringan. (Tidak tersedia untuk PDF).</p>
+                Proses di Server. Cepat. (Tidak tersedia untuk PDF Foto).</p>
                 <p><b>2. Client Side (Laptop)</b><br>
-                Proses di Browser (Ada progress bar). Wajib untuk PDF.</p>
+                Proses di Laptop. Ada progress bar. Wajib untuk PDF dengan Foto.</p>
             </div>
         `,
         showDenyButton: true,
@@ -709,6 +702,7 @@ async function triggerDownload(type, projectId) {
         denyButtonColor: '#1976d2',
         cancelButtonText: 'Batal',
         didOpen: () => {
+            // Disable tombol server side khusus PDF (karena berat)
             if(type === 'pdf') {
                 Swal.getConfirmButton().disabled = true;
                 Swal.getConfirmButton().style.cursor = 'not-allowed';
@@ -717,162 +711,89 @@ async function triggerDownload(type, projectId) {
     });
 
     if (choice.isConfirmed && type !== 'pdf') {
-        processServerExport(type, projectId);
+        processServerExport(type);
     } else if (choice.isDenied) {
-        processClientExport(type, projectId);
+        processClientExport(type);
     }
 }
 
-// ---------------------------------------------------------
-// Opsi 1: Server Side (Menggunakan XHR Tracking via parameter GET)
-// ---------------------------------------------------------
-function processServerExport(type, projectId) {
-    const params = new URLSearchParams();
-    params.set('projectId', projectId); 
-    params.set('action', 'export_full');
-    params.set('type', type);
-
-    const downloadUrl = 'actions.php?' + params.toString();
+// Opsi 1: Server Side (Redirect Biasa)
+function processServerExport(type) {
+    const form = document.getElementById('filterForm');
+    const formData = new FormData(form);
+    const params = new URLSearchParams(formData);
+    params.append('action', 'export_full');
+    params.append('type', type);
 
     Swal.fire({
-        title: 'Mengunduh Data...',
-        html: `
-            <div style="margin-bottom: 15px; font-size: 14px; color: #555;">Menyiapkan file Project #${projectId} via <b>SERVER</b></div>
-            <div style="background:#e0e0e0; border-radius:10px; overflow:hidden; height:24px; width:100%; border: 1px solid #ccc; position: relative;">
-                <div id="dl-progress" style="background: linear-gradient(90deg, #4caf50, #2E7D32); width: 0%; height: 100%; transition: width 0.2s ease;"></div>
-                <div id="dl-text" style="position: absolute; top: 0; left: 0; width: 100%; text-align: center; color: white; font-weight: bold; font-size: 13px; line-height: 24px; text-shadow: 1px 1px 2px rgba(0,0,0,0.6);">Menghubungkan...</div>
-            </div>
-        `,
-        allowOutsideClick: false,
-        showConfirmButton: false
+        title: 'Memproses di Server...',
+        html: 'Harap tunggu file terunduh.',
+        didOpen: () => Swal.showLoading()
     });
 
-    const xhr = new XMLHttpRequest();
-    xhr.open('GET', downloadUrl, true);
-    xhr.responseType = 'blob'; 
-
-    xhr.onprogress = function(e) {
-        const bar = document.getElementById('dl-progress');
-        const txt = document.getElementById('dl-text');
-
-        if (e.lengthComputable) {
-            const percentComplete = Math.round((e.loaded / e.total) * 100);
-            if (bar) bar.style.width = percentComplete + '%';
-            if (txt) txt.innerHTML = percentComplete + '%';
-        } else {
-            const mbLoaded = (e.loaded / (1024 * 1024)).toFixed(2);
-            if (bar) { bar.style.width = '100%'; bar.style.backgroundImage = 'repeating-linear-gradient(45deg, #2E7D32, #2E7D32 10px, #4caf50 10px, #4caf50 20px)'; }
-            if (txt) txt.innerHTML = mbLoaded + ' MB terunduh...';
-        }
-    };
-
-    xhr.onload = function() {
-        if (this.status === 200) {
-            // [PENTING] Mencegah bug "ZIP kosong / rusak" karena PHP melempar error HTML
-            const contentType = xhr.getResponseHeader('Content-Type');
-            if (contentType && contentType.includes('text/html')) {
-                Swal.fire('Data Kosong / Error', 'Tidak ada foto/data yang valid untuk diexport pada Project ini menggunakan server.', 'error');
-                return;
-            }
-
-            const bar = document.getElementById('dl-progress');
-            const txt = document.getElementById('dl-text');
-            if (bar) { bar.style.width = '100%'; bar.style.backgroundImage = 'linear-gradient(90deg, #4caf50, #2E7D32)'; }
-            if (txt) txt.innerHTML = '100% (Selesai)';
-
-            let filename = `Export_Proj_${projectId}_${type}_${new Date().getTime()}.${(type === 'download_zip' ? 'zip' : type)}`;
-            const disposition = xhr.getResponseHeader('Content-Disposition');
-            if (disposition && disposition.indexOf('attachment') !== -1) {
-                const matches = /filename[^;=\n]*=((['"]).*?\2|[^;\n]*)/.exec(disposition);
-                if (matches != null && matches[1]) filename = matches[1].replace(/['"]/g, ''); 
-            }
-
-            const blob = this.response;
-            const windowUrl = window.URL || window.webkitURL;
-            const downloadUrlBlob = windowUrl.createObjectURL(blob);
-            
-            const a = document.createElement("a");
-            a.href = downloadUrlBlob;
-            a.download = filename;
-            document.body.appendChild(a);
-            a.click();
-            
-            setTimeout(function() {
-                windowUrl.revokeObjectURL(downloadUrlBlob);
-                document.body.removeChild(a);
-                Swal.close();
-            }, 500);
-        } else {
-            Swal.fire('Error', 'Gagal mengunduh file. Status Server: ' + this.status, 'error');
-        }
-    };
-
-    xhr.onerror = function() { Swal.fire('Error Jaringan', 'Koneksi terputus saat mengunduh data.', 'error'); };
-    xhr.send();
+    window.location.href = 'actions.php?' + params.toString();
+    setTimeout(() => Swal.close(), 3000);
 }
 
-// ---------------------------------------------------------
-// Opsi 2: Client Side (Diperbaiki memanggil API Internal di index.php)
-// ---------------------------------------------------------
-async function processClientExport(type, projectId) {
-    const params = new URLSearchParams();
-    params.set('projectId', projectId); 
-    params.set('ajax_export', '1'); // <-- Memanggil fungsi PHP di paling atas index.php
+// Opsi 2: Client Side (Fetch JSON -> Build File)
+async function processClientExport(type) {
+    const form = document.getElementById('filterForm');
+    const formData = new FormData(form);
+    
+    // PDF juga butuh data full seperti CSV/KML
+    let jsonAction = (type === 'download_zip') ? 'get_json_photos' : 'get_json_full';
+    
+    formData.append('action', 'export_full');
+    formData.append('type', jsonAction);
 
-    Swal.fire({ title: 'Mengambil Data Project...', didOpen: () => Swal.showLoading() });
+    Swal.fire({ title: 'Mengambil Data...', didOpen: () => Swal.showLoading() });
 
     try {
-        const response = await fetch('index.php?' + params.toString());
-        const text = await response.text();
-        
-        let result;
-        try {
-            result = JSON.parse(text);
-        } catch(e) {
-            console.error("Response bukan JSON:", text);
-            throw new Error("Format respon server tidak valid.");
-        }
+        const response = await fetch('actions.php', { method: 'POST', body: formData });
+        const result = await response.json();
 
-        if (result.status !== 'success') {
-            throw new Error(result.message || "Gagal mengambil data dari server.");
-        }
-        if (!result.data || result.data.length === 0) {
-            throw new Error(`Tidak ada data ditemukan untuk Project #${projectId}.`);
+        if (result.status !== 'success' || !result.data || result.data.length === 0) {
+            throw new Error("Tidak ada data ditemukan.");
         }
 
         const data = result.data;
         
-        if (type === 'download_zip') await generateZipClient(data, projectId);
-        else if (type === 'csv') generateCSVClient(data, projectId);
-        else if (type === 'kml') generateKMLClient(data, projectId);
-        else if (type === 'pdf') await generatePDFClient(data, projectId);
+        // Pilihan Generator
+        if (type === 'download_zip') await generateZipClient(data);
+        else if (type === 'csv') generateCSVClient(data);
+        else if (type === 'kml') generateKMLClient(data);
+        else if (type === 'pdf') await generatePDFClient(data); // <-- Fungsi Baru
 
     } catch (error) {
-        Swal.fire('Gagal', error.message, 'error');
+        Swal.fire('Gagal', error.message || 'Terjadi kesalahan.', 'error');
     }
 }
 
 // ---------------------------------------------------------
-// GENERATOR PDF
+// GENERATOR PDF (BARU)
 // ---------------------------------------------------------
-async function generatePDFClient(data, projectId) {
+async function generatePDFClient(data) {
     const { jsPDF } = window.jspdf;
+    
+    // Setting Kertas: Landscape ('l'), satuan mm, ukuran A4
     const doc = new jsPDF('l', 'mm', 'a4'); 
 
     const total = data.length;
     let processed = 0;
 
+    // --- Loading Bar ---
     Swal.fire({
         title: 'Menyiapkan PDF',
         html: `Memuat gambar: <b id="pdf-c">0</b> / ${total}<br><div style="background:#ddd;height:10px;margin-top:5px;"><div id="pdf-b" style="background:#d32f2f;height:100%;width:0%"></div></div>`,
         showConfirmButton: false, allowOutsideClick: false
     });
 
+    // 1. Pre-load Gambar ke Base64
     for (let i = 0; i < data.length; i++) {
         const row = data[i];
         try {
             if(row.full_photo_url) {
-                const blob = await fetch(row.full_photo_url, {mode: 'cors'}).then(r => r.blob());
+                const blob = await fetch(row.full_photo_url).then(r => r.blob());
                 row.base64Img = await new Promise((resolve) => {
                     const reader = new FileReader();
                     reader.onloadend = () => resolve(reader.result);
@@ -887,10 +808,12 @@ async function generatePDFClient(data, projectId) {
 
     Swal.update({ html: 'Menyusun Halaman PDF...' });
 
+    // 2. Header & Judul
     const pageWidth = doc.internal.pageSize.getWidth();
+    
     doc.setFontSize(18);
     doc.setTextColor(46, 125, 50);
-    doc.text(`LAPORAN MONITORING SEEDLOC - PROJECT #${projectId}`, pageWidth / 2, 15, { align: 'center' });
+    doc.text("LAPORAN MONITORING SEEDLOC", pageWidth / 2, 15, { align: 'center' });
     
     doc.setFontSize(10);
     doc.setTextColor(100);
@@ -900,17 +823,19 @@ async function generatePDFClient(data, projectId) {
     doc.setLineWidth(1);
     doc.line(10, 25, pageWidth - 10, 25);
 
+    // [PERBAIKAN UTAMA] Definisikan resultData DI SINI (Sebelum autoTable)
     const resultData = data; 
 
+    // 3. Tabel Data
     doc.autoTable({
         startY: 30,
-        pageBreak: 'auto',
-        rowPageBreak: 'avoid',
+        pageBreak: 'auto',      // Mode standar
+        rowPageBreak: 'avoid',  // PENTING: Jika baris tidak muat, pindahkan ke halaman baru
         margin: { top: 30, bottom: 20},
         head: [['No', 'Foto', 'Lokasi Project', 'Jenis Pohon', 'Kondisi', 'Koordinat', 'Petugas']],
         body: data.map((r, index) => [
             index + 1,
-            '', 
+            '', // Placeholder Foto
             r.locationName,
             r.itemType,
             r.condition,
@@ -918,7 +843,12 @@ async function generatePDFClient(data, projectId) {
             r.officers || '-'
         ]),
         theme: 'grid',
-        headStyles: { fillColor: [46, 125, 50], textColor: [255, 255, 255], halign: 'center', fontSize: 10 },
+        headStyles: { 
+            fillColor: [46, 125, 50],
+            textColor: [255, 255, 255],
+            halign: 'center',
+            fontSize: 10
+        },
         bodyStyles: { valign: 'middle', fontSize: 9 },
         columnStyles: {
             0: { cellWidth: 10, halign: 'center' },
@@ -930,8 +860,11 @@ async function generatePDFClient(data, projectId) {
             6: { cellWidth: 'auto' }
         },
         didDrawCell: function(dataHook) {
+            // Kita ubah nama parameternya jadi dataHook biar gak bingung
             if (dataHook.column.index === 1 && dataHook.cell.section === 'body') {
                 const rowIndex = dataHook.row.index;
+                
+                // Ambil dari variabel resultData yang SUDAH didefinisikan di atas
                 if (resultData[rowIndex] && resultData[rowIndex].base64Img) {
                     const imgData = resultData[rowIndex].base64Img;
                     doc.addImage(imgData, 'JPEG', dataHook.cell.x + 2, dataHook.cell.y + 2, 15, 20);
@@ -940,14 +873,15 @@ async function generatePDFClient(data, projectId) {
         }
     });
 
-    doc.save(`Laporan_Project_${projectId}_${new Date().toISOString().slice(0,10)}.pdf`);
+    // 4. Save File
+    doc.save(`Laporan_SeedLoc_${new Date().toISOString().slice(0,10)}.pdf`);
     Swal.fire('Selesai', 'PDF Berhasil dibuat!', 'success');
 }
+// ---------------------------------------------------------
+// GENERATOR LAINNYA (CSV, KML, ZIP - TETAP SAMA)
+// ---------------------------------------------------------
 
-// ---------------------------------------------------------
-// GENERATOR LAINNYA (CSV, KML, ZIP)
-// ---------------------------------------------------------
-function generateCSVClient(data, projectId) {
+function generateCSVClient(data) {
     let csvContent = "\uFEFFID,ProjectID,Officer,Lat,Lng,Loc,Time,Type,Cond,Detail,Photo URL\n";
     data.forEach(r => {
         const clean = (text) => `"${(text || '').toString().replace(/"/g, '""')}"`;
@@ -955,37 +889,28 @@ function generateCSVClient(data, projectId) {
         csvContent += row + "\n";
     });
     const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8" });
-    saveAs(blob, `Export_Proj_${projectId}.csv`);
+    saveAs(blob, `Export_Client.csv`);
     Swal.fire('Selesai', 'File CSV dibuat.', 'success');
 }
 
-function generateKMLClient(data, projectId) {
-    let kml = '<' + '?xml version="1.0" encoding="UTF-8"?>\n' +
-              '<kml xmlns="http://www.opengis.net/kml/2.2">\n' +
-              '<Document>\n' +
-              `<name>Export Project ${projectId}</name>\n`;
+function generateKMLClient(data) {
+    let kml = '<'+'?xml version="1.0" encoding="UTF-8"?'+'>'
+    '<kml xmlns="http://www.opengis.net/kml/2.2">'
+    '<Document>\n'
+    '<name>Export Client</name>';
     data.forEach(r => {
         const desc = `Tipe: ${r.itemType}\nKondisi: ${r.condition}\nPetugas: ${r.officers||'-'}\nWaktu: ${r.timestamp}`.replace(/&/g, '&amp;');
-        kml += `<Placemark><name>#${r.id}</name><description>${desc}</description><Point><coordinates>${r.longitude},${r.latitude}</coordinates></Point></Placemark>\n`;
+        kml += `<Placemark><name>#${r.id}</name><description>${desc}</description><Point><coordinates>${r.longitude},${r.latitude}</coordinates></Point></Placemark>`;
     });
     kml += `</Document></kml>`;
     const blob = new Blob([kml], { type: "application/vnd.google-earth.kml+xml" });
-    saveAs(blob, `Export_Proj_${projectId}.kml`);
+    saveAs(blob, `Export_Client.kml`);
     Swal.fire('Selesai', 'File KML dibuat.', 'success');
 }
 
-async function generateZipClient(data, projectId) {
+async function generateZipClient(photos) {
     const zip = new JSZip();
-    
-    // Saring data agar hanya memproses yang memiliki link foto
-    const validPhotos = data.filter(r => r.full_photo_url);
-    const total = validPhotos.length;
-    
-    if(total === 0) {
-        Swal.fire('Informasi', 'Tidak ada foto pada project ini yang bisa di-download.', 'info');
-        return;
-    }
-
+    const total = photos.length;
     let count = 0;
 
     Swal.fire({
@@ -994,32 +919,20 @@ async function generateZipClient(data, projectId) {
         showConfirmButton: false, allowOutsideClick: false
     });
 
-    for (const r of validPhotos) {
+    for (const photo of photos) {
         try {
-            const blob = await fetch(r.full_photo_url, {mode: 'cors'}).then(res => res.ok ? res.blob() : null);
-            if(blob) { 
-                let cleanType = (r.itemType || 'Pohon').replace(/[^a-zA-Z0-9]/g, '_');
-                let filename = `${r.id}_${cleanType}.jpg`;
-                zip.file(filename, blob); 
-                count++; 
-                document.getElementById('zip-c').innerText = count; 
-                document.getElementById('zip-b').style.width = Math.round((count/total)*100) + '%'; 
-            }
+            const blob = await fetch(photo.url).then(r => r.ok ? r.blob() : null);
+            if(blob) { zip.file(photo.name, blob); count++; document.getElementById('zip-c').innerText = count; document.getElementById('zip-b').style.width = Math.round((count/total)*100) + '%'; }
         } catch(e){}
     }
     
-    if (count === 0) {
-        Swal.fire('Gagal', 'Semua foto gagal diunduh (terjadi kendala akses URL).', 'error');
-        return;
-    }
-
     const content = await zip.generateAsync({ type: "blob" });
-    saveAs(content, `Export_Proj_${projectId}_Photos.zip`);
+    saveAs(content, `Export_Photos.zip`);
     Swal.fire('Selesai', `ZIP ${count} foto siap.`, 'success');
 }
 
 // ---------------------------------------------------------
-// INITIAL LOAD & EVENTS (GEOTAGS DATA)
+// INITIAL LOAD & EVENTS
 // ---------------------------------------------------------
 
 function loadGeotagsData(page) {
@@ -1029,6 +942,7 @@ function loadGeotagsData(page) {
     params.append('page', page);
     window.history.pushState(null, '', '?' + params.toString());
 
+    // Animasi Loading
     let timerInterval;
     Swal.fire({
         title: 'Memuat Data...',
@@ -1099,12 +1013,13 @@ function renderPagination(pg) {
     container.innerHTML = '';
     if(pg.total_pages <= 1) return;
     let html = (pg.current_page > 1) ? `<a onclick="loadGeotagsData(${pg.current_page-1})">&laquo; Prev</a>` : `<a class="disabled">&laquo; Prev</a>`;
+    // Simplifikasi pagination logic agar pendek
     html += `<a class="active">${pg.current_page} / ${pg.total_pages}</a>`;
     html += (pg.current_page < pg.total_pages) ? `<a onclick="loadGeotagsData(${pg.current_page+1})">Next &raquo;</a>` : `<a class="disabled">Next &raquo;</a>`;
     container.innerHTML = html;
 }
 
-// Helpers Form
+// Helpers Form & Detail
 function injectFiltersToForm(fid) {
     const f = document.getElementById(fid);
     if(!f) return;
@@ -1129,35 +1044,9 @@ function confirmBulk(){
     }}); 
 }
 
-// VIEW DETAIL MODAL
-function viewDetail(data) {
-    var photoUrl = data.photoPath ? (data.photoPath.startsWith('http') ? data.photoPath : '<?=$photo_base_url?>' + data.photoPath) : '';
-    var badgeStyle = (data.condition === 'Hidup' || data.condition === 'Baik') ? 'background:#e8f5e9;color:#2E7D32;' : ((data.condition === 'Merana') ? 'background:#fff3cd;color:#856404;' : 'background:#ffebee;color:#c62828;');
-
-    var html = `
-    <div style="text-align:center;margin-bottom:15px;">
-        ${photoUrl ? `<img src="${photoUrl}" style="max-width:100%;max-height:280px;border-radius:8px;box-shadow:0 4px 10px rgba(0,0,0,0.15); cursor:pointer;" onclick="Swal.fire({imageUrl: '${photoUrl}', imageAlt: 'Foto Geotag', showConfirmButton: false, width: 'auto', background: 'transparent'})">` : '<div style="padding:30px;background:#f5f5f5;border-radius:8px;color:#888;"><i class="fas fa-image fa-3x" style="color:#ddd;margin-bottom:10px;display:block;"></i>Tidak Ada Foto</div>'}
-    </div>
-    <div style="text-align:left;">
-        <table style="width:100%; border-collapse: collapse; font-size:14px;">
-            <tr style="border-bottom:1px solid #eee;"><td style="padding:10px 0; width:35%; color:#555;"><b><i class="fas fa-hashtag" style="width:20px; text-align:center;"></i> ID Data</b></td><td style="padding:10px 0;">#${data.id}</td></tr>
-            <tr style="border-bottom:1px solid #eee;"><td style="padding:10px 0; color:#555;"><b><i class="fas fa-leaf" style="width:20px; text-align:center; color:#2E7D32;"></i> Jenis</b></td><td style="padding:10px 0; font-weight:bold; font-size:15px;">${data.itemType}</td></tr>
-            <tr style="border-bottom:1px solid #eee;"><td style="padding:10px 0; color:#555;"><b><i class="fas fa-user-tag" style="width:20px; text-align:center; color:#1976d2;"></i> Petugas</b></td><td style="padding:10px 0;">${data.officers || '-'}</td></tr>
-            <tr style="border-bottom:1px solid #eee;"><td style="padding:10px 0; color:#555;"><b><i class="fas fa-map-marker-alt" style="width:20px; text-align:center; color:#d32f2f;"></i> Lokasi</b></td><td style="padding:10px 0;">${data.locationName}</td></tr>
-            <tr style="border-bottom:1px solid #eee;"><td style="padding:10px 0; color:#555;"><b><i class="fas fa-heartbeat" style="width:20px; text-align:center;"></i> Kondisi</b></td><td style="padding:10px 0;"><span style="padding:5px 10px; border-radius:4px; font-size:12px; font-weight:bold; ${badgeStyle}">${data.condition}</span></td></tr>
-            <tr style="border-bottom:1px solid #eee;"><td style="padding:10px 0; color:#555;"><b><i class="fas fa-globe" style="width:20px; text-align:center;"></i> Koordinat</b></td><td style="padding:10px 0; font-family:monospace;">${data.latitude}, ${data.longitude}</td></tr>
-            <tr style="border-bottom:1px solid #eee;"><td style="padding:10px 0; color:#555;"><b><i class="far fa-clock" style="width:20px; text-align:center;"></i> Waktu</b></td><td style="padding:10px 0;">${data.timestamp}</td></tr>
-            <tr><td style="padding:10px 0; color:#555;"><b><i class="fas fa-info-circle" style="width:20px; text-align:center;"></i> Detail</b></td><td style="padding:10px 0;">${data.details || '-'}</td></tr>
-        </table>
-    </div>`;
-
-    Swal.fire({
-        title: 'Detail Geotag',
-        html: html,
-        showCloseButton: true,
-        showConfirmButton: false,
-        width: '500px'
-    });
+function viewDetail(d) {
+    document.getElementById('detailContent').innerHTML = `<table style="width:100%"><tr><td>JENIS</td><td>${d.itemType}</td></tr><tr><td>LOKASI</td><td>${d.locationName}</td></tr><tr><td>KOORDINAT</td><td>${d.latitude}, ${d.longitude}</td></tr><tr><td>WAKTU</td><td>${d.timestamp}</td></tr></table>`;
+    document.getElementById('detailModal').style.display='flex';
 }
 
 document.addEventListener("DOMContentLoaded", function() {
@@ -1173,7 +1062,7 @@ document.addEventListener("DOMContentLoaded", function() {
         });
     });
 
-    // Initial Load Geotags
+    // Initial Load
     if(new URLSearchParams(location.search).get('table') === 'geotags') {
         loadGeotagsData(new URLSearchParams(location.search).get('page')||1);
         const f = document.getElementById('filterForm');
