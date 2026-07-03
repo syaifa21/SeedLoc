@@ -9,6 +9,8 @@ require_once 'actions.php';
 // ENDPOINT API KHUSUS CLIENT-SIDE EXPORT
 // =================================================================
 if (isset($_GET['ajax_export'])) {
+    $stl = 'set_time_limit'; if (is_callable($stl)) @$stl(0);
+    $ins = 'ini_set'; if (is_callable($ins)) @$ins('memory_limit', '2048M');
     header('Content-Type: application/json');
     list($where, $params) = buildWhere('geotags', $pdo);
     $w_sql = $where ? "WHERE " . implode(' AND ', $where) : "";
@@ -59,6 +61,8 @@ foreach($filter_keys as $key) {
     <title>SeedLoc Admin Panel</title>
     <link rel="icon" href="https://seedloc.my.id/logo.png" type="image/png">
     
+    <script src="https://unpkg.com/shp-write@0.3.2/shpwrite.js"></script>
+
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
     <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.4.1/dist/MarkerCluster.css" />
@@ -149,6 +153,7 @@ if(isset($_SESSION['swal_error'])){ echo "<script>Swal.fire({icon:'error',title:
         <li><a href="<?=build_url(['action'=>'map'])?>" class="<?=$action=='map'?'active':''?>"><i class="fas fa-map-marked-alt"></i> <span>Peta Sebaran</span></a></li>
         <li><a href="<?=build_url(['action'=>'layers'])?>" class="<?=$action=='layers'?'active':''?>"><i class="fas fa-layer-group"></i> <span>Lapisan Overlay</span></a></li>
         <li><a href="<?=build_url(['action'=>'list', 'table'=>'projects'])?>" class="<?=($action=='list'&&$table=='projects')?'active':''?>"><i class="fas fa-folder-open"></i> <span>Data Projects</span></a></li>
+        <li><a href="?action=groups" class="<?=$action=='groups'?'active':''?>"><i class="fas fa-layer-group"></i> <span>Kelola Grup Project</span></a></li>
         <li><a href="<?=build_url(['action'=>'list', 'table'=>'geotags'])?>" class="<?=($action=='list'&&$table=='geotags')?'active':''?>"><i class="fas fa-leaf"></i> <span>Data Geotags</span></a></li>
         <li><a href="<?=build_url(['action'=>'gallery'])?>" class="<?=$action=='gallery'?'active':''?>"><i class="fas fa-images"></i> <span>Galeri Foto</span></a></li>
         <li style="border-top:1px solid #f0f0f0;margin:10px 0;"></li>
@@ -160,7 +165,28 @@ if(isset($_SESSION['swal_error'])){ echo "<script>Swal.fire({icon:'error',title:
 <main class="main">
     
     <?php if($action === 'dashboard'): ?>
-        <div class="header"><h2>Overview Dashboard</h2></div>
+        <div class="header" style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:15px;">
+            <h2 style="margin:0;">Overview Dashboard <?= !empty($_GET['groupId']) ? '<span style="color:#2E7D32;">- Grup</span>' : '' ?></h2>
+            <form id="projectFilterForm" style="display:flex; align-items:center;">
+                <input type="hidden" name="action" value="dashboard">
+                <select name="groupId" onchange="document.getElementById('projectFilterForm').submit()" style="padding:8px 15px; border:2px solid #2E7D32; border-radius:8px; min-width:250px; font-weight:bold; font-size:15px; outline:none; cursor:pointer; background:#fff;">
+                    <option value="">-- Silakan Pilih Kegiatan (Grup) --</option>
+                    <?php foreach($project_groups as $p): ?>
+                        <option value="<?=$p['id']?>" <?=($_GET['groupId']??'')==$p['id']?'selected':''?>>
+                            <?=htmlspecialchars($p['name'])?>
+                        </option>
+                    <?php endforeach; ?>
+                </select>
+            </form>
+        </div>
+        
+        <?php if(empty($stats)): ?>
+            <div class="card" style="text-align:center; padding:60px 20px; color:#666; margin-top:20px; border:2px dashed #ccc; box-shadow:none;">
+                <i class="fas fa-hand-pointer fa-4x" style="color:#ddd; margin-bottom:20px;"></i>
+                <h3 style="margin-top:0; color:#444;">Belum Ada Kegiatan Dipilih</h3>
+                <p style="font-size:15px; max-width:500px; margin:0 auto; line-height:1.5;">Silakan pilih salah satu kegiatan (Project) pada menu dropdown di atas untuk mulai melihat ringkasan data, grafik progres, dan leaderboard petugas secara spesifik.</p>
+            </div>
+        <?php else: ?>
         
         <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:20px;margin-bottom:25px;">
             <div class="card" style="border-left:5px solid #2E7D32;display:flex;align-items:center;gap:15px;">
@@ -222,6 +248,7 @@ if(isset($_SESSION['swal_error'])){ echo "<script>Swal.fire({icon:'error',title:
             new Chart(document.getElementById('c2'),{type:'line',data:{labels:<?=json_encode(array_keys($stats['daily']))?>,datasets:[{label:'Geotag Masuk',data:<?=json_encode(array_values($stats['daily']))?>,borderColor:'#2E7D32',tension:0.3,fill:true,backgroundColor:'rgba(46,125,50,0.1)'}]}});
             new Chart(document.getElementById('c3'), {type: 'bar',data: {labels: <?=json_encode(array_keys($stats['loc_stats']))?>,datasets: [{label: 'Jumlah Data',data: <?=json_encode(array_values($stats['loc_stats']))?>,backgroundColor: '#1976d2',borderRadius: 4}]},options: {responsive: true,maintainAspectRatio: false,scales: {y: {beginAtZero: true,ticks: { precision: 0 }}} }});
         </script>
+        <?php endif; ?>
 
     <?php elseif($action === 'monitor'): ?>
         <div class="header"><h2>Monitoring Target Penanaman</h2></div>
@@ -252,6 +279,13 @@ if(isset($_SESSION['swal_error'])){ echo "<script>Swal.fire({icon:'error',title:
             <input type="hidden" name="action" value="map">
             
             <input type="text" name="search" placeholder="Cari ID, Petugas, atau Detail..." value="<?=htmlspecialchars($_GET['search']??'')?>" style="max-width:200px; flex:1;">
+            
+            <select name="groupId" style="max-width:150px;">
+                <option value="all">Semua Grup</option>
+                <?php foreach($project_groups as $p): ?>
+                    <option value="<?=$p['id']?>" <?=($_GET['groupId']??'')==$p['id']?'selected':''?>><?=htmlspecialchars($p['name'])?></option>
+                <?php endforeach; ?>
+            </select>
             
             <select name="locationName" style="max-width:150px;">
                 <option value="all">Semua Lokasi</option>
@@ -439,9 +473,17 @@ if(isset($_SESSION['swal_error'])){ echo "<script>Swal.fire({icon:'error',title:
             <?php else: ?><p style="color:red;">Akses terbatas.</p><?php endif; ?>
         </div>
 
-    <?php elseif(in_array($action, ['list', 'users'])): ?>
-        <div class="header"><h2 style="margin:0;">Data <?=ucfirst($table)?></h2><a href="?action=create&table=<?=$action=='users'?'admin_users':$table?>" class="btn btn-p"><i class="fas fa-plus-circle"></i> Tambah Data</a></div>
-        
+   <?php elseif(in_array($action, ['list', 'users'])): ?>
+        <div class="header">
+            <h2 style="margin:0;">Data <?=ucfirst($table)?></h2>
+            <div style="display:flex; gap:10px;">
+                <?php if($table == 'geotags'): ?>
+                    <button type="button" onclick="chooseExportAll()" class="btn btn-w" style="background:#f39c12;"><i class="fas fa-download"></i> Download Semua Data</button>
+                <?php endif; ?>
+                <a href="?action=create&table=<?=$action=='users'?'admin_users':$table?>" class="btn btn-p"><i class="fas fa-plus-circle"></i> Tambah Data</a>
+            </div>
+        </div>
+
         <?php if($action=='list'): ?>
         <form class="filter-bar" id="filterForm">
             <input type="hidden" name="action" value="list"><input type="hidden" name="table" value="<?=$table?>">
@@ -502,7 +544,7 @@ if(isset($_SESSION['swal_error'])){ echo "<script>Swal.fire({icon:'error',title:
                             <?php if($table=='geotags'): ?>
                                 <th width="30"><input type="checkbox" onclick="toggle(this)"></th><th width="40">No</th><th>Foto</th><th>ID</th><th>Jenis</th><th>Petugas</th><th>Lokasi</th><th>Koordinat</th><th>Tanggal</th><th>Kondisi</th>
                             <?php else: ?>
-                                <th>ID Project</th><th>Nama Kegiatan</th><th>Lokasi Project</th><th>Petugas</th><th>Status</th>
+                                <th>ID Project</th><th>Grup</th><th>Nama Kegiatan</th><th>Lokasi Project</th><th>Petugas</th><th>Status</th>
                             <?php endif; ?>
                             <th style="text-align:right;">Aksi</th>
                         </tr>
@@ -511,7 +553,7 @@ if(isset($_SESSION['swal_error'])){ echo "<script>Swal.fire({icon:'error',title:
                         <?php if($table != 'geotags'): ?>
                             <?php if(empty($list_data)): ?><tr><td colspan="11" align="center" style="padding:30px;">Tidak ada data.</td></tr><?php else: foreach($list_data as $r): ?>
                                 <tr>
-                                    <td><b>#<?=$r['projectId']?></b></td><td><?=$r['activityName']?></td><td><?=$r['locationName']?></td><td><?=$r['officers']?></td><td><span class="status-badge status-<?=$r['status']?>"><?=$r['status']?></span></td>
+                                    <td><b>#<?=$r['projectId']?></b></td><td><span style="background:#e3f2fd;color:#1976d2;padding:2px 6px;border-radius:4px;font-size:12px;"><?=htmlspecialchars($r['groupName']??'Unassigned')?></span></td><td><?=$r['activityName']?></td><td><?=$r['locationName']?></td><td><?=$r['officers']?></td><td><span class="status-badge status-<?=$r['status']?>"><?=$r['status']?></span></td>
                                     <td style="text-align:right;">
                                         <button type="button" onclick="chooseExport('<?=$r['projectId']?>')" class="btn btn-w" title="Download Export Project"><i class="fas fa-download"></i> Export</button> 
                                         <a href="?action=edit&table=projects&id=<?=$r['projectId']?>" class="btn btn-b"><i class="fas fa-edit"></i></a> 
@@ -534,6 +576,121 @@ if(isset($_SESSION['swal_error'])){ echo "<script>Swal.fire({icon:'error',title:
         <?php endif; ?>
 
         <form method="post" id="delForm"><input type="hidden" name="delete" value="1"><input type="hidden" name="delete_id" id="delId"><input type="hidden" name="csrf_token" value="<?=$_SESSION['csrf_token']?>"><?=$hidden_filters?></form>
+
+        <?php elseif($action == 'groups'): ?>
+            <div class="header">
+                <h2>Kelola Grup Kegiatan</h2>
+                <button class="btn btn-p" onclick="document.getElementById('createGroupModal').style.display='flex'">+ Buat Grup Baru</button>
+            </div>
+
+            <div style="display:grid; grid-template-columns:repeat(auto-fill,minmax(350px,1fr)); gap:20px; margin-top:20px;">
+                <?php if(empty($project_groups)): ?>
+                    <div style="grid-column:1/-1; padding:30px; text-align:center; background:#fff; border-radius:8px; color:#666;">
+                        Belum ada Grup yang dibuat. Silakan buat grup baru untuk mengelompokkan Project.
+                    </div>
+                <?php else: foreach($project_groups as $g): ?>
+                    <div class="card" style="padding:20px;">
+                        <div style="display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:15px; border-bottom:1px solid #eee; padding-bottom:10px;">
+                            <div>
+                                <h3 style="margin:0; color:#2E7D32;"><?=htmlspecialchars($g['name'])?></h3>
+                                <small style="color:#888;"><?=htmlspecialchars($g['description'])?></small>
+                            </div>
+                            <div style="display:flex; gap:5px;">
+                                <button type="button" class="btn btn-b" style="padding:5px 10px;" onclick="openEditGroupModal(<?=$g['id']?>, '<?=htmlspecialchars(addslashes($g['name']))?>', '<?=htmlspecialchars(addslashes($g['description']??''))?>')" title="Edit Grup"><i class="fas fa-edit"></i></button>
+                                <form method="post" onsubmit="return confirm('Hapus grup ini? Project di dalamnya TIDAK akan terhapus.');">
+                                    <input type="hidden" name="delete_group" value="<?=$g['id']?>">
+                                    <input type="hidden" name="csrf_token" value="<?=$_SESSION['csrf_token']?>">
+                                    <button class="btn btn-d" style="padding:5px 10px;" title="Hapus Grup"><i class="fas fa-trash"></i></button>
+                                </form>
+                            </div>
+                        
+                        <b style="font-size:13px; color:#555;">Project Terdaftar:</b>
+                        <ul style="margin:10px 0; padding-left:20px; font-size:14px; color:#444;">
+                            <?php if(empty($g['projects'])): ?>
+                                <li style="color:#999; list-style:none; margin-left:-20px;">Belum ada project di grup ini.</li>
+                            <?php else: foreach($g['projects'] as $p): ?>
+                                <li style="margin-bottom:5px;">
+                                    <form method="post" style="display:inline;" onsubmit="return confirm('Keluarkan project ini dari grup?')">
+                                        <input type="hidden" name="remove_project_group" value="<?=$p['projectId']?>">
+                                        <input type="hidden" name="csrf_token" value="<?=$_SESSION['csrf_token']?>">
+                                        <b>#<?=$p['projectId']?></b> - <?=htmlspecialchars($p['activityName'])?>
+                                        <button type="submit" style="background:none; border:none; color:#d32f2f; cursor:pointer;" title="Keluarkan dari grup"><i class="fas fa-times-circle"></i></button>
+                                    </form>
+                                </li>
+                            <?php endforeach; endif; ?>
+                        </ul>
+
+                        <?php if(!empty($unassigned_projects)): ?>
+                        <form method="post" style="margin-top:15px; display:flex; gap:8px;">
+                            <input type="hidden" name="add_project_group" value="<?=$g['id']?>">
+                            <input type="hidden" name="csrf_token" value="<?=$_SESSION['csrf_token']?>">
+                            <select name="projectId" required style="flex:1; padding:8px; border:1px solid #ccc; border-radius:4px; font-size:13px;">
+                                <option value="">+ Tambah Project...</option>
+                                <?php foreach($unassigned_projects as $up): ?>
+                                    <option value="<?=$up['projectId']?>">#<?=$up['projectId']?> - <?=htmlspecialchars($up['activityName'])?></option>
+                                <?php endforeach; ?>
+                            </select>
+                            <button class="btn btn-b" style="padding:8px 15px;"><i class="fas fa-plus"></i></button>
+                        </form>
+                        <?php endif; ?>
+                    </div>
+                <?php endforeach; endif; ?>
+            </div>
+
+            <!-- Modal Buat Grup -->
+            <div id="createGroupModal" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.5); z-index:9999; justify-content:center; align-items:center;">
+                <div class="card" style="width:100%; max-width:400px; padding:25px;">
+                    <h3 style="margin-top:0;">Buat Grup Baru</h3>
+                    <form method="post">
+                        <input type="hidden" name="create_group" value="1">
+                        <input type="hidden" name="csrf_token" value="<?=$_SESSION['csrf_token']?>">
+                        <div style="margin-bottom:15px;">
+                            <label>Nama Grup / Kegiatan</label><br>
+                            <input type="text" name="name" required style="width:100%; padding:10px; margin-top:5px; border:1px solid #ccc; border-radius:5px;" placeholder="Misal: Penanaman Jabar">
+                        </div>
+                        <div style="margin-bottom:20px;">
+                            <label>Deskripsi Singkat (Opsional)</label><br>
+                            <input type="text" name="description" style="width:100%; padding:10px; margin-top:5px; border:1px solid #ccc; border-radius:5px;">
+                        </div>
+                        <div style="text-align:right;">
+                            <button type="button" class="btn btn-d" onclick="document.getElementById('createGroupModal').style.display='none'">Batal</button>
+                            <button type="submit" class="btn btn-p">Simpan Grup</button>
+                        </div>
+                    </form>
+                </div>
+            </div>
+
+            <!-- Modal Edit Grup -->
+            <div id="editGroupModal" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.5); z-index:9999; justify-content:center; align-items:center;">
+                <div class="card" style="width:100%; max-width:400px; padding:25px;">
+                    <h3 style="margin-top:0;">Edit Grup</h3>
+                    <form method="post">
+                        <input type="hidden" name="edit_group" id="editGroupId" value="">
+                        <input type="hidden" name="csrf_token" value="<?=$_SESSION['csrf_token']?>">
+                        <div style="margin-bottom:15px;">
+                            <label>Nama Grup / Kegiatan</label><br>
+                            <input type="text" name="name" id="editGroupName" required style="width:100%; padding:10px; margin-top:5px; border:1px solid #ccc; border-radius:5px;">
+                        </div>
+                        <div style="margin-bottom:20px;">
+                            <label>Deskripsi Singkat (Opsional)</label><br>
+                            <input type="text" name="description" id="editGroupDesc" style="width:100%; padding:10px; margin-top:5px; border:1px solid #ccc; border-radius:5px;">
+                        </div>
+                        <div style="text-align:right;">
+                            <button type="button" class="btn btn-d" onclick="document.getElementById('editGroupModal').style.display='none'">Batal</button>
+                            <button type="submit" class="btn btn-p">Update Grup</button>
+                        </div>
+                    </form>
+                </div>
+            </div>
+            
+            <script>
+            function openEditGroupModal(id, name, desc) {
+                document.getElementById('editGroupId').value = id;
+                document.getElementById('editGroupName').value = name;
+                document.getElementById('editGroupDesc').value = desc;
+                document.getElementById('editGroupModal').style.display = 'flex';
+            }
+            </script>
 
         <?php elseif($action=='users'): $table='admin_users'; ?>
             <div class="card" style="padding:0;overflow:hidden;"><table><thead><tr><th>ID</th><th>Username</th><th>Role</th><th style="text-align:right;">Aksi</th></tr></thead><tbody><?php foreach($list_data as $u): ?><tr><td>#<?=$u['id']?></td><td><b><?=$u['username']?></b></td><td><?=$u['role']?></td><td style="text-align:right;"><a href="?action=edit&table=admin_users&id=<?=$u['id']?>" class="btn btn-b"><i class="fas fa-edit"></i></a></td></tr><?php endforeach; ?></tbody></table></div>
@@ -656,7 +813,70 @@ function switchTable(id) {
 // ---------------------------------------------------------
 // LOGIKA EXPORT (DIPINDAH KE DATA PROJECTS)
 // ---------------------------------------------------------
+// ---------------------------------------------------------
+// LOGIKA DOWNLOAD SEMUA DATA (GLOBAL EXPORT)
+// ---------------------------------------------------------
+async function chooseExportAll() {
+    const typeChoice = await Swal.fire({
+        title: `Export SELURUH Data Geotag`,
+        text: 'Ini akan mengunduh semua data di database tanpa filter. Pilih format:',
+        input: 'select',
+        inputOptions: {
+            'csv': 'CSV (Data Tabel Excel)',
+            'download_zip': 'ZIP (Kumpulan Foto)',
+            'kml': 'KML (Peta Google Earth)',
+            'geojson': 'GeoJSON (Peta GIS Modern)',
+            'pdf': 'PDF (Laporan dengan Foto)'
+        },
+        inputPlaceholder: '-- Pilih Format --',
+        showCancelButton: true,
+        confirmButtonText: 'Lanjut <i class="fas fa-arrow-right"></i>',
+        cancelButtonText: 'Batal'
+    });
 
+    if (typeChoice.isConfirmed && typeChoice.value) {
+        const type = typeChoice.value;
+        triggerDownloadAll(type);
+    }
+}
+
+async function triggerDownloadAll(type) {
+    let titleType = type === 'download_zip' ? 'ZIP' : (type === 'csv' ? 'CSV' : (type === 'pdf' ? 'PDF' : (type === 'geojson' ? 'GeoJSON' : 'KML')));
+
+    const choice = await Swal.fire({
+        title: `Metode Download ALL ${titleType}`,
+        icon: 'warning',
+        html: `
+            <div style="text-align:left; font-size:14px; line-height:1.5;">
+                <p><b>PERHATIAN:</b> Anda akan mengunduh seluruh data base.</p>
+                <p><b>1. Server Side</b><br>
+                Proses background, sangat disarankan untuk data besar (Tidak tersedia untuk PDF).</p>
+                <p><b>2. Client Side (Laptop)</b><br>
+                Browser yang memproses. Bisa lag jika data >10.000.</p>
+            </div>
+        `,
+        showDenyButton: true,
+        showCancelButton: true,
+        confirmButtonText: (type === 'pdf' || type === 'shp' || type === 'geojson') ? 'Tidak Tersedia' : '<i class="fas fa-server"></i> Server Side',
+        confirmButtonColor: (type === 'pdf' || type === 'shp' || type === 'geojson') ? '#ccc' : '#2E7D32',
+        denyButtonText: '<i class="fas fa-laptop"></i> Client Side',
+        denyButtonColor: '#1976d2',
+        cancelButtonText: 'Batal',
+didOpen: () => {
+            if(type === 'pdf' || type === 'shp' || type === 'geojson') {
+                Swal.getConfirmButton().disabled = true;
+                Swal.getConfirmButton().style.cursor = 'not-allowed';
+            }
+        }
+    });
+
+    // Trik Cerdas: Kita gunakan fungsi bawaan tapi lempar parameter 'all'
+    if (choice.isConfirmed && type !== 'pdf' && type !== 'shp' && type !== 'geojson') {
+        processServerExport(type, 'all');
+    } else if (choice.isDenied) {
+        processClientExport(type, 'all');
+    }
+}
 async function chooseExport(projectId) {
     const typeChoice = await Swal.fire({
         title: `Export Project #${projectId}`,
@@ -666,6 +886,7 @@ async function chooseExport(projectId) {
             'csv': 'CSV (Data Tabel Excel)',
             'download_zip': 'ZIP (Kumpulan Foto)',
             'kml': 'KML (Peta Google Earth)',
+            'geojson': 'GeoJSON (Peta GIS Modern)',
             'pdf': 'PDF (Laporan dengan Foto)'
         },
         inputPlaceholder: '-- Pilih Format --',
@@ -681,7 +902,7 @@ async function chooseExport(projectId) {
 }
 
 async function triggerDownload(type, projectId) {
-    let titleType = type === 'download_zip' ? 'ZIP' : (type === 'csv' ? 'CSV' : (type === 'pdf' ? 'PDF' : 'KML'));
+    let titleType = type === 'download_zip' ? 'ZIP' : (type === 'csv' ? 'CSV' : (type === 'pdf' ? 'PDF' : (type === 'geojson' ? 'GeoJSON' : 'KML')));
 
     const choice = await Swal.fire({
         title: `Metode Download ${titleType}`,
@@ -696,20 +917,20 @@ async function triggerDownload(type, projectId) {
         `,
         showDenyButton: true,
         showCancelButton: true,
-        confirmButtonText: (type === 'pdf') ? 'Tidak Tersedia' : '<i class="fas fa-server"></i> Server Side',
-        confirmButtonColor: (type === 'pdf') ? '#ccc' : '#2E7D32',
+        confirmButtonText: (type === 'pdf' || type === 'geojson') ? 'Tidak Tersedia' : '<i class="fas fa-server"></i> Server Side',
+        confirmButtonColor: (type === 'pdf' || type === 'geojson') ? '#ccc' : '#2E7D32',
         denyButtonText: '<i class="fas fa-laptop"></i> Client Side',
         denyButtonColor: '#1976d2',
         cancelButtonText: 'Batal',
         didOpen: () => {
-            if(type === 'pdf') {
+            if(type === 'pdf' || type === 'geojson') {
                 Swal.getConfirmButton().disabled = true;
                 Swal.getConfirmButton().style.cursor = 'not-allowed';
             }
         }
     });
 
-    if (choice.isConfirmed && type !== 'pdf') {
+    if (choice.isConfirmed && type !== 'pdf' && type !== 'geojson') {
         processServerExport(type, projectId);
     } else if (choice.isDenied) {
         processClientExport(type, projectId);
@@ -837,6 +1058,7 @@ async function processClientExport(type, projectId) {
         if (type === 'download_zip') await generateZipClient(data, projectId);
         else if (type === 'csv') generateCSVClient(data, projectId);
         else if (type === 'kml') generateKMLClient(data, projectId);
+        else if (type === 'geojson') await generateGeoJSONClient(data, projectId); // <--- Rute baru
         else if (type === 'pdf') await generatePDFClient(data, projectId);
 
     } catch (error) {
@@ -844,6 +1066,104 @@ async function processClientExport(type, projectId) {
     }
 }
 
+// ---------------------------------------------------------
+// GENERATOR GEOJSON (PENGGANTI SHP YANG JAUH LEBIH BAIK)
+// ---------------------------------------------------------
+async function generateGeoJSONClient(data, projectId) {
+    // Meminta user memilih atribut mana saja yang akan dimasukkan ke dalam properti GeoJSON
+    const { value: selectedFields } = await Swal.fire({
+        title: 'Pilih Atribut GeoJSON',
+        html: `
+            <div style="text-align:left; font-size:14px; margin-bottom:15px; color:#555;">Pilih kolom data yang ingin dimasukkan ke dalam file GeoJSON:</div>
+            <div style="text-align:left; display:grid; grid-template-columns:1fr 1fr; gap:12px;">
+                <label style="cursor:pointer;"><input type="checkbox" id="field_ID" checked> ID Geotag</label>
+                <label style="cursor:pointer;"><input type="checkbox" id="field_ProjectID" checked> ID Project</label>
+                <label style="cursor:pointer;"><input type="checkbox" id="field_Petugas" checked> Nama Petugas</label>
+                <label style="cursor:pointer;"><input type="checkbox" id="field_Lokasi" checked> Lokasi</label>
+                <label style="cursor:pointer;"><input type="checkbox" id="field_Jenis" checked> Jenis Pohon</label>
+                <label style="cursor:pointer;"><input type="checkbox" id="field_Kondisi" checked> Kondisi</label>
+                <label style="cursor:pointer;"><input type="checkbox" id="field_Waktu" checked> Waktu (Timestamp)</label>
+                <label style="cursor:pointer;"><input type="checkbox" id="field_Foto" checked> URL Foto</label>
+            </div>
+        `,
+        focusConfirm: false,
+        showCancelButton: true,
+        confirmButtonText: '<i class="fas fa-download"></i> Export Sekarang',
+        confirmButtonColor: '#2E7D32',
+        cancelButtonText: 'Batal',
+        preConfirm: () => {
+            return {
+                ID: document.getElementById('field_ID').checked,
+                ProjectID: document.getElementById('field_ProjectID').checked,
+                Petugas: document.getElementById('field_Petugas').checked,
+                Lokasi: document.getElementById('field_Lokasi').checked,
+                Jenis: document.getElementById('field_Jenis').checked,
+                Kondisi: document.getElementById('field_Kondisi').checked,
+                Waktu: document.getElementById('field_Waktu').checked,
+                Foto: document.getElementById('field_Foto').checked
+            }
+        }
+    });
+
+    if (!selectedFields) return; // User membatalkan export
+
+    Swal.fire({ title: 'Menyiapkan GeoJSON...', allowOutsideClick: false, didOpen: () => Swal.showLoading() });
+
+    let features = [];
+    
+    // Susun data koordinat dan properti dinamis berdasarkan pilihan user
+    data.forEach(r => {
+        let lat = parseFloat(r.latitude);
+        let lng = parseFloat(r.longitude);
+        
+        if(!isNaN(lat) && !isNaN(lng)) {
+            let props = {};
+            if(selectedFields.ID) props.ID = r.id;
+            if(selectedFields.ProjectID) props.ProjectID = r.projectId;
+            if(selectedFields.Petugas) props.Petugas = r.officers || '-';
+            if(selectedFields.Lokasi) props.Lokasi = r.locationName || '-';
+            if(selectedFields.Jenis) props.Jenis = r.itemType || '-';
+            if(selectedFields.Kondisi) props.Kondisi = r.condition || '-';
+            if(selectedFields.Waktu) props.Waktu = r.timestamp || '-';
+            if(selectedFields.Foto) props.Foto = r.full_photo_url || 'Tidak ada foto';
+
+            features.push({
+                type: "Feature",
+                geometry: { 
+                    type: "Point", 
+                    coordinates: [lng, lat] 
+                },
+                properties: props
+            });
+        }
+    });
+
+    if (features.length === 0) {
+        Swal.fire('Informasi', 'Tidak ada data valid dengan koordinat.', 'info');
+        return;
+    }
+
+    // Bungkus ke format standar GeoJSON
+    let geojson = {
+        type: "FeatureCollection",
+        name: `Export_Proj_${projectId}`,
+        features: features
+    };
+
+    try {
+        // Ubah objek Javascript menjadi teks JSON murni
+        const jsonString = JSON.stringify(geojson, null, 2);
+        
+        // Buat file Blob dan langsung download!
+        const blob = new Blob([jsonString], { type: "application/geo+json" });
+        saveAs(blob, `Export_Proj_${projectId}.geojson`);
+        
+        Swal.fire('Selesai', 'File GeoJSON berhasil diunduh! File ini bisa langsung dimasukkan ke QGIS atau ArcGIS.', 'success');
+    } catch (error) {
+        console.error("GeoJSON Export Error:", error);
+        Swal.fire('Gagal', 'Sistem gagal menyusun GeoJSON.', 'error');
+    }
+}
 // ---------------------------------------------------------
 // GENERATOR PDF
 // ---------------------------------------------------------
@@ -966,9 +1286,10 @@ function generateKMLClient(data, projectId) {
     Swal.fire('Selesai', 'File KML dibuat.', 'success');
 }
 
+// ---------------------------------------------------------
+// GENERATOR ZIP (CLIENT SIDE - MULTIPART & RESUMEABLE)
+// ---------------------------------------------------------
 async function generateZipClient(data, projectId) {
-    const zip = new JSZip();
-    
     const validPhotos = data.filter(r => r.full_photo_url);
     const total = validPhotos.length;
     
@@ -977,38 +1298,117 @@ async function generateZipClient(data, projectId) {
         return;
     }
 
-    let count = 0;
+    // Tentukan batas aman per part
+    const CHUNK_SIZE = 500;
+    const totalParts = Math.ceil(total / CHUNK_SIZE);
+    
+    let startPart = 1;
 
+    // Jika lebih dari 1 part, beri info dan tanyakan mau mulai dari part berapa
+    if (totalParts > 1) {
+        const { value: selectedPart, isConfirmed } = await Swal.fire({
+            title: 'Download Skala Besar',
+            icon: 'info',
+            html: `Terdapat <b>${total} foto</b>.<br><br>Data akan dipecah menjadi <b>${totalParts} file ZIP terpisah</b> (Maksimal ${CHUNK_SIZE} foto per file).<br><br><i>Jika sebelumnya proses terputus, Anda bisa melanjutkan download dari part tertentu.</i>`,
+            input: 'number',
+            inputLabel: `Mulai download dari Part (1 - ${totalParts}):`,
+            inputValue: 1, // Default selalu mulai dari 1
+            inputAttributes: { 
+                min: 1, 
+                max: totalParts, 
+                step: 1 
+            },
+            showCancelButton: true,
+            confirmButtonText: 'Mulai Download',
+            cancelButtonText: 'Batal'
+        });
+
+        // Kalau user klik batal, hentikan proses
+        if (!isConfirmed) return;
+        
+        // Ambil angka dari inputan user
+        startPart = parseInt(selectedPart) || 1;
+        
+        // Validasi inputan agar tidak error (kalau iseng nulis angka minus atau kelebihan)
+        if (startPart < 1) startPart = 1;
+        if (startPart > totalParts) startPart = totalParts;
+    }
+
+    let totalDownloaded = 0;
+
+    // Persiapkan UI Loading
     Swal.fire({
         title: 'Download Foto',
-        html: `Proses: <b id="zip-c">0</b> / ${total}<br><div style="background:#ddd;height:10px;margin-top:5px;"><div id="zip-b" style="background:#2E7D32;height:100%;width:0%"></div></div>`,
-        showConfirmButton: false, allowOutsideClick: false
+        html: `Memproses Part <b id="zip-part">${startPart}</b> dari ${totalParts}<br>
+               Progres Part Ini: <b id="zip-c">0</b> / <span id="zip-t">0</span><br>
+               <div style="background:#ddd;height:10px;margin-top:5px;border-radius:5px;overflow:hidden;">
+                   <div id="zip-b" style="background:#2E7D32;height:100%;width:0%;transition:width 0.2s;"></div>
+               </div>`,
+        showConfirmButton: false, 
+        allowOutsideClick: false
     });
 
-    for (const r of validPhotos) {
-        try {
-            const blob = await fetch(r.full_photo_url, {mode: 'cors'}).then(res => res.ok ? res.blob() : null);
-            if(blob) { 
-                let cleanType = (r.itemType || 'Pohon').replace(/[^a-zA-Z0-9]/g, '_');
-                let filename = `${r.id}_${cleanType}.jpg`;
-                zip.file(filename, blob); 
-                count++; 
-                document.getElementById('zip-c').innerText = count; 
-                document.getElementById('zip-b').style.width = Math.round((count/total)*100) + '%'; 
+    // Looping per Part, DIMULAI DARI INPUT USER
+    // (dikurangi 1 karena array index dimulai dari 0)
+    for (let i = (startPart - 1); i < totalParts; i++) {
+        document.getElementById('zip-part').innerText = (i + 1);
+        
+        let start = i * CHUNK_SIZE;
+        let end = start + CHUNK_SIZE;
+        let chunk = validPhotos.slice(start, end);
+        let chunkTotal = chunk.length;
+        
+        document.getElementById('zip-t').innerText = chunkTotal;
+        document.getElementById('zip-c').innerText = "0";
+        document.getElementById('zip-b').style.width = "0%";
+
+        let zip = new JSZip();
+        let countInPart = 0;
+
+        // Proses foto dalam part ini
+        for (const r of chunk) {
+            try {
+                const blob = await fetch(r.full_photo_url, {mode: 'cors'}).then(res => res.ok ? res.blob() : null);
+                if(blob) { 
+                    let cleanType = (r.itemType || 'Pohon').replace(/[^a-zA-Z0-9]/g, '_');
+                    let filename = `${r.id}_${cleanType}.jpg`;
+                    zip.file(filename, blob); 
+                    
+                    countInPart++; 
+                    totalDownloaded++;
+                    
+                    document.getElementById('zip-c').innerText = countInPart; 
+                    document.getElementById('zip-b').style.width = Math.round((countInPart/chunkTotal)*100) + '%'; 
+                }
+            } catch(e) {
+                console.warn(`Gagal memuat foto ID: ${r.id}`);
             }
-        } catch(e){}
+        }
+        
+
+        
+        // Generate dan Simpan ZIP untuk Part ini
+        if (countInPart > 0) {
+            document.getElementById('zip-c').innerHTML = "<b>Menyusun File ZIP...</b>";
+            const content = await zip.generateAsync({ type: "blob" });
+            
+            let partLabel = totalParts > 1 ? `_Part_${i + 1}` : '';
+            saveAs(content, `Export_Proj_${projectId}_Photos${partLabel}.zip`);
+            
+            // Beri jeda 2 detik agar memori bisa bersih (Garbage Collection)
+            if (i < totalParts - 1) {
+                await new Promise(resolve => setTimeout(resolve, 2000));
+            }
+        }
     }
     
-    if (count === 0) {
-        Swal.fire('Gagal', 'Semua foto gagal diunduh (terjadi kendala akses URL).', 'error');
-        return;
+    // Selesai
+    if (totalDownloaded === 0) {
+        Swal.fire('Gagal', 'Semua foto gagal diunduh pada part ini (terjadi kendala akses).', 'error');
+    } else {
+        Swal.fire('Selesai', `${totalDownloaded} foto berhasil diunduh dari Part ${startPart} hingga ${totalParts}.`, 'success');
     }
-
-    const content = await zip.generateAsync({ type: "blob" });
-    saveAs(content, `Export_Proj_${projectId}_Photos.zip`);
-    Swal.fire('Selesai', `ZIP ${count} foto siap.`, 'success');
 }
-
 // ---------------------------------------------------------
 // INITIAL LOAD & EVENTS (GEOTAGS DATA)
 // ---------------------------------------------------------

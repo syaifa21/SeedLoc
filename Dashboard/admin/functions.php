@@ -62,6 +62,12 @@ function buildWhere($table, $pdo) {
             $where[] = "geotags.projectId=?"; $p[] = $input['projectId']; 
         }
         
+        // Filter Group ID (Kegiatan)
+        if (!empty($input['groupId']) && $input['groupId'] != 'all') { 
+            $where[] = "geotags.projectId IN (SELECT projectId FROM projects WHERE groupId=?)"; 
+            $p[] = $input['groupId']; 
+        }
+        
         // Filter Lokasi
         if (!empty($input['locationName']) && $input['locationName'] != 'all') { 
             $where[] = "geotags.locationName=?"; $p[] = $input['locationName']; 

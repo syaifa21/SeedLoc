@@ -176,6 +176,53 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
         require_auth();
 
+        // --- MANAJEMEN GRUP ---
+        if (isset($_POST['create_group'])) {
+            $name = trim($_POST['name'] ?? '');
+            $desc = trim($_POST['description'] ?? '');
+            if (!empty($name)) {
+                $stmt = $pdo->prepare("INSERT INTO project_groups (name, description) VALUES (?, ?)");
+                $stmt->execute([$name, $desc]);
+                $_SESSION['swal_success'] = "Grup baru berhasil dibuat!";
+            }
+            header("Location: ?action=groups"); exit;
+        }
+        
+        if (isset($_POST['edit_group'])) {
+            $id = (int)$_POST['edit_group'];
+            $name = trim($_POST['name'] ?? '');
+            $desc = trim($_POST['description'] ?? '');
+            if (!empty($name)) {
+                $stmt = $pdo->prepare("UPDATE project_groups SET name = ?, description = ? WHERE id = ?");
+                $stmt->execute([$name, $desc, $id]);
+                $_SESSION['swal_success'] = "Grup berhasil diperbarui!";
+            }
+            header("Location: ?action=groups"); exit;
+        }
+        
+        if (isset($_POST['delete_group'])) {
+            $id = (int)$_POST['delete_group'];
+            $pdo->exec("UPDATE projects SET groupId = NULL WHERE groupId = $id");
+            $pdo->exec("DELETE FROM project_groups WHERE id = $id");
+            $_SESSION['swal_success'] = "Grup berhasil dihapus!";
+            header("Location: ?action=groups"); exit;
+        }
+        
+        if (isset($_POST['add_project_group'])) {
+            $gid = (int)$_POST['add_project_group'];
+            $pid = (int)$_POST['projectId'];
+            $pdo->exec("UPDATE projects SET groupId = $gid WHERE projectId = $pid");
+            $_SESSION['swal_success'] = "Project #$pid berhasil ditambahkan ke grup!";
+            header("Location: ?action=groups"); exit;
+        }
+        
+        if (isset($_POST['remove_project_group'])) {
+            $pid = (int)$_POST['remove_project_group'];
+            $pdo->exec("UPDATE projects SET groupId = NULL WHERE projectId = $pid");
+            $_SESSION['swal_success'] = "Project berhasil dikeluarkan dari grup!";
+            header("Location: ?action=groups"); exit;
+        }
+
         // C. KML LAYER UPLOAD
         if (isset($_POST['upload_kml']) || isset($_POST['delete_kml'])) {
             if (!is_admin()) { 

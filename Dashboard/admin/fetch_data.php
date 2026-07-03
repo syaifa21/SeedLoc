@@ -11,29 +11,54 @@ $page = (int)($_GET['page'] ?? 1);
 $per_page = 100; 
 if ($page < 1) $page = 1;
 
-// --- 1. DASHBOARD (Dioptimalkan) ---
+// --- 1. DASHBOARD (Dioptimalkan & Multi-Tenant Grup) ---
 if ($action === 'dashboard') {
-    // Gunakan COUNT(id) yang jauh lebih ringan daripada SELECT *
-    $stats['geotags'] = $pdo->query("SELECT COUNT(id) FROM geotags")->fetchColumn();
-    $stats['projects'] = $pdo->query("SELECT COUNT(projectId) FROM projects")->fetchColumn();
-    
-    // Statistik Kondisi (Grouping)
-    $stats['cond'] = $pdo->query("SELECT `condition`, COUNT(id) FROM geotags GROUP BY `condition`")->fetchAll(PDO::FETCH_KEY_PAIR);
+    // Cek apakah tabel project_groups sudah ada (cegah error sebelum migrasi)
+    $has_groups = false;
+    try {
+        $pdo->query("SELECT 1 FROM project_groups LIMIT 1");
+        $has_groups = true;
+    } catch (Exception $e) {}
 
-    // Statistik Harian (7 Hari Terakhir)
-    $stats['daily'] = $pdo->query("SELECT DATE(timestamp), COUNT(id) FROM geotags WHERE timestamp >= DATE(NOW()) - INTERVAL 7 DAY GROUP BY DATE(timestamp)")->fetchAll(PDO::FETCH_KEY_PAIR);
-
-    // Statistik Lokasi (Limit 15 teratas agar grafik rapi)
-    $stats['loc_stats'] = $pdo->query("SELECT locationName, COUNT(id) FROM geotags GROUP BY locationName ORDER BY COUNT(id) DESC ")->fetchAll(PDO::FETCH_KEY_PAIR);
+    if ($has_groups) {
+        // Ambil daftar grup untuk menu dropdown
+        $project_groups = $pdo->query("SELECT * FROM project_groups ORDER BY id DESC")->fetchAll();
+    } else {
+        $project_groups = [];
+    }
     
-    // Statistik Petugas (Top 10)
-    $sql_officers = "SELECT p.officers, COUNT(g.id) as total 
-                     FROM projects p 
-                     JOIN geotags g ON p.projectId = g.projectId 
-                     WHERE p.officers IS NOT NULL AND p.officers != '' 
-                     GROUP BY p.officers 
-                     ORDER BY total DESC LIMIT 100"; 
-    $stats['officer_stats'] = $pdo->query($sql_officers)->fetchAll();
+    $selected_group = $_GET['groupId'] ?? '';
+    
+    // Hanya jalankan query berat jika grup sudah dipilih (biar enteng)
+    if ($selected_group !== '' && $has_groups) {
+        $gid = (int)$selected_group;
+        $g_projects = $pdo->query("SELECT projectId FROM projects WHERE groupId = $gid")->fetchAll(PDO::FETCH_COLUMN);
+        
+        if (!empty($g_projects)) {
+            $in_clause = implode(',', $g_projects);
+            $w = "WHERE projectId IN ($in_clause)";
+            $w_and = "AND projectId IN ($in_clause)";
+
+            $stats['geotags'] = $pdo->query("SELECT COUNT(id) FROM geotags $w")->fetchColumn();
+            $stats['projects'] = count($g_projects);
+            
+            $stats['cond'] = $pdo->query("SELECT `condition`, COUNT(id) FROM geotags $w GROUP BY `condition`")->fetchAll(PDO::FETCH_KEY_PAIR);
+            $stats['daily'] = $pdo->query("SELECT DATE(timestamp), COUNT(id) FROM geotags WHERE timestamp >= DATE(NOW()) - INTERVAL 7 DAY $w_and GROUP BY DATE(timestamp)")->fetchAll(PDO::FETCH_KEY_PAIR);
+            $stats['loc_stats'] = $pdo->query("SELECT locationName, COUNT(id) FROM geotags $w GROUP BY locationName ORDER BY COUNT(id) DESC ")->fetchAll(PDO::FETCH_KEY_PAIR);
+            
+            $sql_officers = "SELECT p.officers, COUNT(g.id) as total 
+                             FROM projects p 
+                             JOIN geotags g ON p.projectId = g.projectId 
+                             WHERE p.officers IS NOT NULL AND p.officers != '' AND g.projectId IN ($in_clause)
+                             GROUP BY p.officers 
+                             ORDER BY total DESC LIMIT 100"; 
+            $stats['officer_stats'] = $pdo->query($sql_officers)->fetchAll();
+        } else {
+            // Grup ada tapi belum punya project
+            $stats['geotags'] = 0; $stats['projects'] = 0;
+            $stats['cond'] = []; $stats['daily'] = []; $stats['loc_stats'] = []; $stats['officer_stats'] = [];
+        }
+    }
 }
 
 // --- 2. MONITORING TARGET ---
@@ -96,6 +121,18 @@ elseif (in_array($action, ['list', 'gallery', 'map', 'users'])) {
     
     // --- QUERY KHUSUS PETA (SHOW ALL) ---
     elseif ($action == 'map') {
+        $has_groups = false;
+        try {
+            $pdo->query("SELECT 1 FROM project_groups LIMIT 1");
+            $has_groups = true;
+        } catch (Exception $e) {}
+
+        if ($has_groups) {
+            $project_groups = $pdo->query("SELECT * FROM project_groups ORDER BY id DESC")->fetchAll();
+        } else {
+            $project_groups = [];
+        }
+        
         list($where, $p) = buildWhere('geotags', $pdo);
         $w_sql = $where ? "WHERE ".implode(' AND ', $where) : "";
         
@@ -147,7 +184,38 @@ elseif (in_array($action, ['list', 'gallery', 'map', 'users'])) {
             // Dropdown filter project
             if ($action === 'list') $projects_list = $pdo->query("SELECT projectId, locationName FROM projects ORDER BY projectId DESC LIMIT 100")->fetchAll();
 
-        } else {
+        } 
+        // --- DAFTAR LIST (Data Projects) ---
+        elseif ($action == 'list' && $table == 'projects') {
+            $has_groups = false;
+            try {
+                $pdo->query("SELECT 1 FROM project_groups LIMIT 1");
+                $has_groups = true;
+            } catch (Exception $e) {}
+
+            if ($has_groups) {
+                $sql = "SELECT projects.*, project_groups.name as groupName FROM projects LEFT JOIN project_groups ON projects.groupId = project_groups.id ORDER BY projectId DESC";
+            } else {
+                $sql = "SELECT * FROM projects ORDER BY projectId DESC";
+            }
+            $list_data = $pdo->query($sql)->fetchAll();
+        }
+        // --- MANAJEMEN GRUP ---
+        elseif ($action == 'groups') {
+            $project_groups = [];
+            $unassigned_projects = [];
+            try {
+                $project_groups = $pdo->query("SELECT * FROM project_groups ORDER BY id DESC")->fetchAll();
+                $unassigned_projects = $pdo->query("SELECT projectId, activityName FROM projects WHERE groupId IS NULL ORDER BY projectId DESC")->fetchAll();
+                
+                foreach ($project_groups as &$g) {
+                    $g['projects'] = $pdo->query("SELECT projectId, activityName FROM projects WHERE groupId = " . (int)$g['id'])->fetchAll();
+                }
+            } catch (Exception $e) {
+                // Tabel belum dibuat
+            }
+        }
+        else {
             // Logic umum untuk tabel lain (misal: projects)
             $stmt = $pdo->prepare("SELECT COUNT(*) FROM `$table` $w_sql"); $stmt->execute($p); $total_rows = $stmt->fetchColumn();
             $stmt = $pdo->prepare("SELECT * FROM `$table` $w_sql ORDER BY `$pk` DESC LIMIT $per_page OFFSET $offset");
