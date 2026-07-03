@@ -1,12 +1,12 @@
 <?php
-// index.php - FIXED FILTERS (Photo & Duplicate) & UPDATED UI POPUP
+// index.php - FIXED FILTERS, EXPORT & LAZY LOADING
 
 require_once 'config.php';
 require_once 'functions.php';
 require_once 'actions.php';
 
 // =================================================================
-// ENDPOINT API KHUSUS CLIENT-SIDE EXPORT (Memperbaiki error ZIP kosong)
+// ENDPOINT API KHUSUS CLIENT-SIDE EXPORT
 // =================================================================
 if (isset($_GET['ajax_export'])) {
     header('Content-Type: application/json');
@@ -23,7 +23,6 @@ if (isset($_GET['ajax_export'])) {
         $stmt->execute($params);
         $data = $stmt->fetchAll();
         
-        // Buat URL foto lengkap untuk diproses oleh JavaScript (Client-side)
         foreach($data as &$row) {
             $row['full_photo_url'] = !empty($row['photoPath']) ? get_photo_url($row['photoPath'], $photo_base_url) : '';
         }
@@ -343,7 +342,7 @@ if(isset($_SESSION['swal_error'])){ echo "<script>Swal.fire({icon:'error',title:
 
             // C. MARKER CLUSTERING & DATA RENDERING
             var markers = L.markerClusterGroup({
-                chunkedLoading: true, // Anti-Freeze untuk data banyak
+                chunkedLoading: true, 
                 chunkInterval: 200,
                 chunkDelay: 50
             });
@@ -352,12 +351,12 @@ if(isset($_SESSION['swal_error'])){ echo "<script>Swal.fire({icon:'error',title:
             if (!Array.isArray(pts)) pts = []; 
 
             var bounds = [];
-            var mapDataStore = {}; // Global store untuk akses data di Modal
+            var mapDataStore = {}; 
 
             // Helper: Buka Modal Detail dari Klik Marker
             window.openDetailFromMap = function(id) {
                 if(mapDataStore[id]) {
-                    viewDetail(mapDataStore[id]);
+                    viewDetail(mapDataStore[id]); 
                 }
             };
 
@@ -378,13 +377,10 @@ if(isset($_SESSION['swal_error'])){ echo "<script>Swal.fire({icon:'error',title:
                     var lng = parseFloat(p.longitude);
                     
                     if(!isNaN(lat) && !isNaN(lng)){
-                        // Simpan data untuk modal
                         mapDataStore[p.id] = p;
 
-                        // Warna Marker
                         var color = (p.condition == 'Hidup' || p.condition == 'Baik') ? 'green' : ((p.condition == 'Merana') ? 'orange' : 'red');
                         
-                        // Icon Bulat
                         var icon = L.divIcon({
                             className: 'custom-div-icon', 
                             html: `<div style="background-color:${color}; width:12px; height:12px; border-radius:50%; border:2px solid white; box-shadow:0 0 3px black;"></div>`, 
@@ -393,13 +389,13 @@ if(isset($_SESSION['swal_error'])){ echo "<script>Swal.fire({icon:'error',title:
 
                         var photoUrl = p.photoPath ? (p.photoPath.startsWith('http') ? p.photoPath : '<?=$photo_base_url?>' + p.photoPath) : '';
                         
-                        // Isi Popup di Peta
+                        // Isi Popup di Peta -> DIBERI LAZY LOADING
                         var popupContent = `
                             <div style="min-width:200px; text-align:center;">
                                 <b style="font-size:14px;">${p.itemType}</b> <br>
                                 <span style="font-size:10px; color:#666;">#${p.id} - ${p.locationName}</span><br>
                                 <span style="color:${color}; font-weight:bold;">${p.condition}</span><br>
-                                ${photoUrl ? `<img src="${photoUrl}" style="width:100%; height:120px; object-fit:cover; margin-top:5px; border-radius:4px;">` : ''}
+                                ${photoUrl ? `<img src="${photoUrl}" loading="lazy" style="width:100%; height:120px; object-fit:cover; margin-top:5px; border-radius:4px; background:#eee;">` : ''}
                                 
                                 <div style="margin-top:10px; display:flex; gap:5px;">
                                     <button onclick="openDetailFromMap('${p.id}')" class="btn btn-i" style="flex:1; padding:5px; font-size:11px; border-radius:4px;">
@@ -422,14 +418,12 @@ if(isset($_SESSION['swal_error'])){ echo "<script>Swal.fire({icon:'error',title:
                 m.addLayer(markers);
                 Swal.close();
 
-                // Auto Zoom ke Data (Jika tidak ada KML)
                 <?php if(!file_exists($kml_file_path)): ?>
                     if(bounds.length) m.fitBounds(bounds);
                 <?php endif; ?>
                 
             }, 500); 
         </script>
-
 
     <?php elseif($action === 'layers'): ?>
         <div class="header"><h2>Manajemen Layer</h2></div>
@@ -520,7 +514,6 @@ if(isset($_SESSION['swal_error'])){ echo "<script>Swal.fire({icon:'error',title:
                                     <td><b>#<?=$r['projectId']?></b></td><td><?=$r['activityName']?></td><td><?=$r['locationName']?></td><td><?=$r['officers']?></td><td><span class="status-badge status-<?=$r['status']?>"><?=$r['status']?></span></td>
                                     <td style="text-align:right;">
                                         <button type="button" onclick="chooseExport('<?=$r['projectId']?>')" class="btn btn-w" title="Download Export Project"><i class="fas fa-download"></i> Export</button> 
-                                        
                                         <a href="?action=edit&table=projects&id=<?=$r['projectId']?>" class="btn btn-b"><i class="fas fa-edit"></i></a> 
                                         <button type="button" onclick="confirmDel('<?=$r['projectId']?>')" class="btn btn-d"><i class="fas fa-trash"></i></button>
                                     </td>
@@ -552,7 +545,7 @@ if(isset($_SESSION['swal_error'])){ echo "<script>Swal.fire({icon:'error',title:
             <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:15px;">
                 <?php if(!empty($list_data)): foreach($list_data as $r): $i=get_photo_url($r['photoPath']??'', $photo_base_url); if(!$i) continue; ?>
                 <div class="card" style="padding:0;overflow:hidden;cursor:pointer;" onclick='viewDetail(<?=json_encode($r)?>)'>
-                    <img src="<?=$i?>" style="width:100%;height:150px;object-fit:cover;">
+                    <img src="<?=$i?>" loading="lazy" style="width:100%;height:150px;object-fit:cover;background:#eee;">
                     <div style="padding:10px;"><b style="font-size:14px;"><?=$r['itemType']?></b><br><small><?=$r['locationName']?></small></div>
                 </div>
                 <?php endforeach; endif; ?>
@@ -724,7 +717,7 @@ async function triggerDownload(type, projectId) {
 }
 
 // ---------------------------------------------------------
-// Opsi 1: Server Side (Menggunakan XHR Tracking via parameter GET)
+// Opsi 1: Server Side 
 // ---------------------------------------------------------
 function processServerExport(type, projectId) {
     const params = new URLSearchParams();
@@ -768,7 +761,6 @@ function processServerExport(type, projectId) {
 
     xhr.onload = function() {
         if (this.status === 200) {
-            // [PENTING] Mencegah bug "ZIP kosong / rusak" karena PHP melempar error HTML
             const contentType = xhr.getResponseHeader('Content-Type');
             if (contentType && contentType.includes('text/html')) {
                 Swal.fire('Data Kosong / Error', 'Tidak ada foto/data yang valid untuk diexport pada Project ini menggunakan server.', 'error');
@@ -812,12 +804,12 @@ function processServerExport(type, projectId) {
 }
 
 // ---------------------------------------------------------
-// Opsi 2: Client Side (Diperbaiki memanggil API Internal di index.php)
+// Opsi 2: Client Side 
 // ---------------------------------------------------------
 async function processClientExport(type, projectId) {
     const params = new URLSearchParams();
     params.set('projectId', projectId); 
-    params.set('ajax_export', '1'); // <-- Memanggil fungsi PHP di paling atas index.php
+    params.set('ajax_export', '1'); 
 
     Swal.fire({ title: 'Mengambil Data Project...', didOpen: () => Swal.showLoading() });
 
@@ -977,7 +969,6 @@ function generateKMLClient(data, projectId) {
 async function generateZipClient(data, projectId) {
     const zip = new JSZip();
     
-    // Saring data agar hanya memproses yang memiliki link foto
     const validPhotos = data.filter(r => r.full_photo_url);
     const total = validPhotos.length;
     
@@ -1070,7 +1061,9 @@ function renderTable(rows) {
     rows.forEach(r => {
         const safe = JSON.stringify(r.raw).replace(/"/g, '&quot;');
         qp.set('action', 'edit'); qp.set('table', 'geotags'); qp.set('id', r.id);
-        const img = r.photoUrl ? `<img src="${r.photoUrl}" width="150" height="200" style="object-fit:cover;border-radius:4px;cursor:pointer;" onclick="viewDetail(${safe})">` : '-';
+        
+        // DIBERI LAZY LOADING DISINI
+        const img = r.photoUrl ? `<img src="${r.photoUrl}" loading="lazy" width="150" height="200" style="object-fit:cover;border-radius:4px;cursor:pointer;background:#eee;" onclick="viewDetail(${safe})">` : '-';
 
         tbody.insertAdjacentHTML('beforeend', `
             <tr>
@@ -1134,9 +1127,10 @@ function viewDetail(data) {
     var photoUrl = data.photoPath ? (data.photoPath.startsWith('http') ? data.photoPath : '<?=$photo_base_url?>' + data.photoPath) : '';
     var badgeStyle = (data.condition === 'Hidup' || data.condition === 'Baik') ? 'background:#e8f5e9;color:#2E7D32;' : ((data.condition === 'Merana') ? 'background:#fff3cd;color:#856404;' : 'background:#ffebee;color:#c62828;');
 
+    // DIBERI LAZY LOADING DISINI JUGA
     var html = `
     <div style="text-align:center;margin-bottom:15px;">
-        ${photoUrl ? `<img src="${photoUrl}" style="max-width:100%;max-height:280px;border-radius:8px;box-shadow:0 4px 10px rgba(0,0,0,0.15); cursor:pointer;" onclick="Swal.fire({imageUrl: '${photoUrl}', imageAlt: 'Foto Geotag', showConfirmButton: false, width: 'auto', background: 'transparent'})">` : '<div style="padding:30px;background:#f5f5f5;border-radius:8px;color:#888;"><i class="fas fa-image fa-3x" style="color:#ddd;margin-bottom:10px;display:block;"></i>Tidak Ada Foto</div>'}
+        ${photoUrl ? `<img src="${photoUrl}" loading="lazy" style="max-width:100%;max-height:280px;border-radius:8px;box-shadow:0 4px 10px rgba(0,0,0,0.15); cursor:pointer; background:#eee;" onclick="Swal.fire({imageUrl: '${photoUrl}', imageAlt: 'Foto Geotag', showConfirmButton: false, width: 'auto', background: 'transparent'})">` : '<div style="padding:30px;background:#f5f5f5;border-radius:8px;color:#888;"><i class="fas fa-image fa-3x" style="color:#ddd;margin-bottom:10px;display:block;"></i>Tidak Ada Foto</div>'}
     </div>
     <div style="text-align:left;">
         <table style="width:100%; border-collapse: collapse; font-size:14px;">
